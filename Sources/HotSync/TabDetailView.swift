@@ -14,8 +14,11 @@ struct TabDetailView: View {
     var body: some View {
         VStack(spacing: 12) {
             header
+                .padding([.horizontal, .top])
             // Der Kopf bleibt stehen, der Rest rollt: mit den Abgleich-
-            // Abschnitten passt nicht mehr alles ins Fenster
+            // Abschnitten passt nicht mehr alles ins Fenster. Der Rand liegt
+            // am Inhalt, nicht am ScrollView, damit der Rollbalken am
+            // Fensterrand sitzt.
             ScrollView {
                 VStack(spacing: 12) {
                     if let status = appState.status(tab.id) {
@@ -36,10 +39,9 @@ struct TabDetailView: View {
                             .frame(height: 260)
                     }
                 }
-                .padding(.bottom, 4)
+                .padding([.horizontal, .bottom])
             }
         }
-        .padding()
         .frame(maxHeight: .infinity, alignment: .top)
         .alert(L10n.restoreConfirmTitle, isPresented: $confirmRestore) {
             Button(L10n.cancel, role: .cancel) {}
