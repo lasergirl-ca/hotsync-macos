@@ -93,14 +93,7 @@ public struct CalendarEvent: Equatable, Sendable {
     }
 
     /// A trailing type-tagged block; "Bd00" is the time zone.
-    public struct Blob: Equatable, Sendable {
-        public var type: String
-        public var data: Data
-        public init(type: String, data: Data) {
-            self.type = type
-            self.data = data
-        }
-    }
+    public typealias Blob = PalmBlob
 
     public var date: PalmDate
     /// nil: an event without a time ("timeless")
@@ -208,13 +201,7 @@ public struct CalendarEvent: Equatable, Sendable {
         note = flags & Self.noteFlag != 0 ? try r.cString() : nil
         location = flags & Self.locationFlag != 0 ? try r.cString() : nil
 
-        blobs = []
-        while r.remaining >= 6 {
-            let type = PalmText.string(try r.slice(4))
-            let length = Int(try r.u16())
-            blobs.append(Blob(type: type, data: Data(try r.slice(length))))
-        }
-        guard r.isAtEnd else { throw PalmFormatError.trailingBytes(count: r.remaining) }
+        blobs = try PalmBlob.readAll(&r)
     }
 
     // MARK: Encoding
@@ -266,13 +253,7 @@ public struct CalendarEvent: Equatable, Sendable {
             flags |= Self.locationFlag
             w.cString(location)
         }
-        for blob in blobs {
-            var type = PalmText.bytes(blob.type)
-            if type.count > 4 { type = Array(type.prefix(4)) }
-            w.append(type + [UInt8](repeating: 0, count: 4 - type.count))
-            w.u16(UInt16(blob.data.count))
-            w.append(blob.data)
-        }
+        for blob in blobs { blob.write(&w) }
         w.set(flags, at: 6)
         return w.data
     }
