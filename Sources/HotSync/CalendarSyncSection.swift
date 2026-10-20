@@ -60,7 +60,10 @@ struct CalendarSyncSection: View {
         } label: {
             Label(L10n.calendarSyncTitle, systemImage: "calendar")
         }
-        .onAppear { refreshAccess() }
+        .onAppear {
+            refreshAccess()
+            if appState.calendarPreview(for: profileId) == nil { appState.refreshCalendarPreview(for: profileId) }
+        }
     }
 
     private var calendarList: some View {

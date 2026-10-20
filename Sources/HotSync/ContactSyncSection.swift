@@ -59,7 +59,10 @@ struct ContactSyncSection: View {
         } label: {
             Label(L10n.contactSyncTitle, systemImage: "person.crop.circle")
         }
-        .onAppear { refreshAccess() }
+        .onAppear {
+            refreshAccess()
+            if appState.contactPreview(for: profileId) == nil { appState.refreshContactPreview(for: profileId) }
+        }
     }
 
     private var containerList: some View {

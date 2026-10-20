@@ -846,22 +846,18 @@ final class AppState {
     private(set) var contactPreviews: [UUID: String] = [:]
     private var previewTasks: [String: Task<Void, Never>] = [:]
 
-    func calendarPreview(for profileId: UUID) -> String? {
-        if calendarPreviews[profileId] == nil { refreshCalendarPreview(for: profileId) }
-        return calendarPreviews[profileId]
-    }
-
-    func contactPreview(for profileId: UUID) -> String? {
-        if contactPreviews[profileId] == nil { refreshContactPreview(for: profileId) }
-        return contactPreviews[profileId]
-    }
+    // Nur lesen: ein Anstoß von hier aus würde beim Zeichnen den Zustand
+    // ändern und die View endlos neu zeichnen. Die Abschnitte stoßen beim
+    // Erscheinen an.
+    func calendarPreview(for profileId: UUID) -> String? { calendarPreviews[profileId] }
+    func contactPreview(for profileId: UUID) -> String? { contactPreviews[profileId] }
 
     func refreshCalendarPreview(for profileId: UUID) {
         let key = "calendar-\(profileId)"
         previewTasks[key]?.cancel()
         guard let settings = deviceManager.profile(profileId)?.calendarSync, !settings.calendars.isEmpty,
               calendarSource.hasAccess else {
-            calendarPreviews[profileId] = nil
+            if calendarPreviews[profileId] != nil { calendarPreviews[profileId] = nil }
             return
         }
         let source = calendarSource
@@ -880,7 +876,7 @@ final class AppState {
         previewTasks[key]?.cancel()
         guard let settings = deviceManager.profile(profileId)?.contactSync, !settings.containers.isEmpty,
               contactSource.hasAccess else {
-            contactPreviews[profileId] = nil
+            if contactPreviews[profileId] != nil { contactPreviews[profileId] = nil }
             return
         }
         let source = contactSource
