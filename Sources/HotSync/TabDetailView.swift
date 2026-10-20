@@ -14,23 +14,29 @@ struct TabDetailView: View {
     var body: some View {
         VStack(spacing: 12) {
             header
-            if let status = appState.status(tab.id) {
-                if status.isSyncing || status.lastResult != nil || status.lastBackup != nil
-                    || status.lastRestore != nil || status.lastROMDump != nil {
-                    resultBox(status)
+            // Der Kopf bleibt stehen, der Rest rollt: mit den Abgleich-
+            // Abschnitten passt nicht mehr alles ins Fenster
+            ScrollView {
+                VStack(spacing: 12) {
+                    if let status = appState.status(tab.id) {
+                        if status.isSyncing || status.lastResult != nil || status.lastBackup != nil
+                            || status.lastRestore != nil || status.lastROMDump != nil {
+                            resultBox(status)
+                        }
+                    }
+                    CalendarSyncSection(profileId: tab.profileId)
+                    ContactSyncSection(profileId: tab.profileId)
+                    if let queue = appState.queue(for: tab) {
+                        QueueSection(queue: queue, profileId: tab.profileId,
+                                     isSyncing: appState.status(tab.id)?.isSyncing == true)
+                        InstalledSection(queue: queue)
+                    }
+                    if let status = appState.status(tab.id) {
+                        TabLogSection(log: status.log)
+                            .frame(height: 260)
+                    }
                 }
-            }
-            CalendarSyncSection(profileId: tab.profileId)
-            ContactSyncSection(profileId: tab.profileId)
-            if let queue = appState.queue(for: tab) {
-                QueueSection(queue: queue, profileId: tab.profileId,
-                             isSyncing: appState.status(tab.id)?.isSyncing == true)
-                InstalledSection(queue: queue)
-            }
-            if let status = appState.status(tab.id) {
-                // Das Log bekommt den restlichen Platz im Fenster
-                TabLogSection(log: status.log)
-                    .frame(maxHeight: .infinity)
+                .padding(.bottom, 4)
             }
         }
         .padding()
