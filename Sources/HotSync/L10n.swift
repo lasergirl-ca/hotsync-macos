@@ -470,6 +470,68 @@ enum L10n {
         "\(name) NICHT gesichert (Palm-OS-Fehler \(palmOSError))",
         "\(name) NOT backed up (Palm OS error \(palmOSError))"
     ) }
+    // MARK: - Kalender-Abgleich
+
+    static var calendarSyncTitle: String { s("Kalender: Mac → Palm", "Calendar: Mac → Palm") }
+    static var calendarSyncToggle: String { s(
+        "Beim HotSync den Kalender des Macs auf den Palm spielen",
+        "Put the Mac's calendar on the Palm at each HotSync"
+    ) }
+    static var calendarSyncChoose: String { s("Kalender wählen", "Choose calendars") }
+    static var calendarSyncWarning: String { s(
+        "Der Kalender des Palms wird dabei ersetzt: Einträge, die auf dem Palm geändert wurden, gehen verloren.",
+        "The Palm's calendar is replaced: entries edited on the Palm are lost."
+    ) }
+    static var calendarSyncAllow: String { s("Zugriff auf Kalender erlauben …", "Allow access to Calendar …") }
+    static var calendarSyncDenied: String { s(
+        "Kein Zugriff auf Kalender: in den Systemeinstellungen unter Datenschutz & Sicherheit › Kalender erlauben",
+        "No access to Calendar: allow it in System Settings under Privacy & Security › Calendars"
+    ) }
+    static var calendarSubscribed: String { s("abonniert", "subscribed") }
+    static var calendarGone: String { s("nicht mehr vorhanden", "no longer exists") }
+    static var calendarSyncCategory: String { s("Kategorie", "Category") }
+    static var calendarSyncCategoryHelp: String { s(
+        "Kategorie auf dem Palm (bis 15 Zeichen); leer: der Name des Kalenders. Mehrere Kalender können eine teilen.",
+        "Category on the Palm (up to 15 characters); empty: the calendar's name. Several calendars can share one."
+    ) }
+    static var calendarSyncWindowLabel: String { s("Zeitraum:", "Window:") }
+    static func calendarSyncDays(_ days: Int, back: Bool) -> String {
+        back ? s("\(days) Tage zurück", "\(days) days back") : s("\(days) Tage voraus", "\(days) days ahead")
+    }
+    static var calendarSyncNoCalendars: String { s("Noch kein Kalender gewählt", "No calendar chosen yet") }
+    static func calendarSyncPreview(_ records: Int, _ series: Int, _ expanded: Int) -> String { s(
+        "\(records) Einträge beim nächsten HotSync (\(series) Serien, \(expanded) aufgelöst)",
+        "\(records) records at the next HotSync (\(series) series, \(expanded) expanded)"
+    ) }
+    static func logCalendarQueued(_ records: Int, _ series: Int, _ bytes: Int) -> String { s(
+        "Kalender gebaut: \(records) Einträge (\(series) Serien), CalendarDB-PDat.pdb (\(bytes) Bytes) in der Warteschlange",
+        "Calendar built: \(records) records (\(series) series), CalendarDB-PDat.pdb (\(bytes) bytes) queued"
+    ) }
+    static func logCalendarWarning(_ text: String) -> String { s("Kalender: \(text)", "Calendar: \(text)") }
+    static var logCalendarNoAccess: String { s(
+        "Kalender nicht gebaut: kein Zugriff auf Kalender", "Calendar not built: no access to Calendar"
+    ) }
+    static func logCalendarFailed(_ reason: String) -> String { s(
+        "Kalender nicht gebaut: \(reason)", "Calendar not built: \(reason)"
+    ) }
+    static var logCalendarChecking: String { s(
+        "Prüfe CalendarDB-PDat auf dem Palm …", "Checking CalendarDB-PDat on the Palm …"
+    ) }
+    static func logCalendarChecked(_ records: Int, _ identical: Int, _ different: Int, _ deleted: Int, _ categories: [String]) -> String { s(
+        "CalendarDB-PDat auf dem Palm: \(records) Datensätze, \(identical) lesbar, \(different) abweichend, \(deleted) gelöscht; Kategorien: \(categories.joined(separator: ", "))",
+        "CalendarDB-PDat on the Palm: \(records) records, \(identical) decode, \(different) differ, \(deleted) deleted; categories: \(categories.joined(separator: ", "))"
+    ) }
+    static func logCalendarRecordDiffers(_ id: UInt32, _ bytes: Int, _ hex: String) -> String { s(
+        "Datensatz \(id) (\(bytes) Bytes) kommt anders zurück: \(hex) …",
+        "Record \(id) (\(bytes) bytes) does not come back the same: \(hex) …"
+    ) }
+    static func logCalendarCheckFailed(_ stage: String, _ message: String) -> String { s(
+        "Kalenderprüfung abgebrochen (\(stage): \(message))", "Calendar check stopped (\(stage): \(message))"
+    ) }
+    static func phaseReadingCalendar(_ name: String, _ done: Int) -> String { s(
+        "Prüfe den Kalender von \(name) … \(done) Datensätze", "Checking \(name)'s calendar … \(done) records"
+    ) }
+
     static func logBackupFinished(_ saved: Int, _ unchanged: Int, _ failed: Int) -> String { s(
         "Sicherung fertig: \(saved) neu oder geändert, \(unchanged) unverändert, \(failed) nicht lesbar",
         "Backup done: \(saved) new or changed, \(unchanged) unchanged, \(failed) unreadable"

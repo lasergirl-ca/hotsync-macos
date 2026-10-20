@@ -20,6 +20,7 @@ struct TabDetailView: View {
                     resultBox(status)
                 }
             }
+            CalendarSyncSection(profileId: tab.profileId)
             if let queue = appState.queue(for: tab) {
                 QueueSection(queue: queue, profileId: tab.profileId,
                              isSyncing: appState.status(tab.id)?.isSyncing == true)
@@ -200,7 +201,7 @@ struct TabDetailView: View {
 
     private var phaseColor: Color {
         switch phase {
-        case .restoring, .syncing, .backingUp, .dumpingROM: return .blue
+        case .restoring, .syncing, .backingUp, .readingCalendar, .dumpingROM: return .blue
         case .listening: return .green
         case .waitingForPort: return .orange
         case .idle: return .gray
@@ -212,6 +213,7 @@ struct TabDetailView: View {
         case .syncing: return "arrow.triangle.2.circlepath"
         case .restoring: return "arrow.counterclockwise.circle"
         case .backingUp: return "externaldrive.badge.timemachine"
+        case .readingCalendar: return "calendar"
         case .dumpingROM: return "memorychip"
         case .listening: return "antenna.radiowaves.left.and.right"
         case .waitingForPort: return "hourglass"
@@ -228,6 +230,8 @@ struct TabDetailView: View {
             return L10n.phaseRestoring(user.name, done, total, file)
         case .backingUp(let user, let file, let done, let total):
             return L10n.phaseBackingUp(user.name, done, total, file)
+        case .readingCalendar(let user, let done):
+            return L10n.phaseReadingCalendar(user.name, done)
         case .dumpingROM(let user, let done, let total):
             return L10n.phaseDumpingROM(user.name, done, total)
         case .listening:

@@ -1,5 +1,6 @@
 import Foundation
 import HotSyncCore
+import PalmSyncMac
 
 struct DeviceProfile: Codable, Identifiable, Equatable {
     let id: UUID
@@ -12,6 +13,8 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     var lastBackupAt: Date?
     /// Palm-OS-Version, wie der Palm sie beim letzten HotSync meldete
     var romVersion: UInt32?
+    /// Kalender-Abgleich Mac → Palm: welche Kalender, wie weit; nil = nie eingerichtet
+    var calendarSync: CalendarSyncSettings?
 
     var palmOS: PalmOSVersion? { romVersion.map(PalmOSVersion.init(rom:)) }
 

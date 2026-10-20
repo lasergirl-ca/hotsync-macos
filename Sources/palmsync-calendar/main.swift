@@ -1,7 +1,8 @@
-// palmsync-calendar: the Mac side of the one-way calendar sync (Phase 2).
-// Reads the chosen Calendar.app calendars through EventKit for a window of
-// days and writes a CalendarDB-PDat.pdb into a device's Install/ folder;
-// the next HotSync installs it and the Palm's Calendar shows the Mac's.
+// palmsync-calendar: the Mac side of the one-way calendar sync (Phase 2) as
+// a command-line tool; the app does the same from its Sync section. Reads
+// the chosen Calendar.app calendars for a window of days and writes a
+// CalendarDB-PDat.pdb into a device's Install/ folder; the next HotSync
+// installs it and the Palm's Calendar shows the Mac's.
 //
 //   palmsync-calendar --list
 //   palmsync-calendar --calendar Work --calendar "Family=iC Family" --device "Zoë Leto" [--back 90] [--ahead 365]
@@ -11,11 +12,12 @@
 // --calendar takes a calendar title (or identifier from --list), with an
 // optional "=Category" naming the Palm category; calendars listed first
 // win when the same invite is in several. The Palm's copy of the database
-// is replaced whole: edits made on the Palm are lost. Phase 3 changes that.
+// is replaced whole: edits made on the Palm are lost. Phase 4 changes that.
 
 import EventKit
 import Foundation
 import PalmSync
+import PalmSyncMac
 
 struct Arguments {
     var list = false
@@ -79,55 +81,6 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-// MARK: - EventKit to MacEvent
-
-func macRecurrence(_ rules: [EKRecurrenceRule]) -> MacRecurrence? {
-    guard let rule = rules.first else { return nil }
-    guard rules.count == 1 else {
-        // several rules: nothing the Palm could express, so make sure it is expanded
-        return MacRecurrence(frequency: .daily, setPositions: [0])
-    }
-    let frequency: MacRecurrence.Frequency
-    switch rule.frequency {
-    case .daily: frequency = .daily
-    case .weekly: frequency = .weekly
-    case .monthly: frequency = .monthly
-    case .yearly: frequency = .yearly
-    @unknown default: return MacRecurrence(frequency: .daily, setPositions: [0])
-    }
-    var end: MacRecurrence.End?
-    if let e = rule.recurrenceEnd {
-        if let date = e.endDate { end = .date(date) } else { end = .count(e.occurrenceCount) }
-    }
-    return MacRecurrence(
-        frequency: frequency,
-        interval: rule.interval,
-        daysOfTheWeek: (rule.daysOfTheWeek ?? []).map { .init($0.dayOfTheWeek.rawValue, weekNumber: $0.weekNumber) },
-        daysOfTheMonth: (rule.daysOfTheMonth ?? []).map(\.intValue),
-        monthsOfTheYear: (rule.monthsOfTheYear ?? []).map(\.intValue),
-        setPositions: (rule.setPositions ?? []).map(\.intValue),
-        end: end,
-        firstDayOfTheWeek: rule.firstDayOfTheWeek)
-}
-
-func macEvent(_ e: EKEvent) -> MacEvent {
-    MacEvent(
-        externalID: e.calendarItemExternalIdentifier,
-        seriesID: e.calendarItemIdentifier,
-        calendarID: e.calendar.calendarIdentifier,
-        title: e.title ?? "",
-        notes: e.notes,
-        location: e.location,
-        url: e.url,
-        start: e.startDate,
-        end: e.endDate,
-        isAllDay: e.isAllDay,
-        alarmOffset: e.alarms?.map(\.relativeOffset).min(),
-        recurrence: e.hasRecurrenceRules ? macRecurrence(e.recurrenceRules ?? []) : nil,
-        occurrenceDate: e.occurrenceDate,
-        isDetached: e.isDetached)
-}
-
 func describe(_ rule: CalendarEvent.Repeat, exceptions: Int) -> String {
     var text = " (repeats "
     switch rule.type {
@@ -162,11 +115,11 @@ do {
     exit(usage.message == nil ? 0 : 2)
 }
 
-let store = EKEventStore()
-let granted = try await store.requestFullAccessToEvents()
+let source = CalendarSource()
+let granted = try await source.requestAccess()
 guard granted else {
     let status: String
-    switch EKEventStore.authorizationStatus(for: .event) {
+    switch source.accessStatus {
     case .notDetermined: status = "not determined (macOS showed no prompt)"
     case .denied: status = "denied"
     case .restricted: status = "restricted"
@@ -177,77 +130,59 @@ guard granted else {
     fail("no access to Calendar (\(status)): allow it in System Settings > Privacy & Security > Calendars")
 }
 
-let all = store.calendars(for: .event)
+let all = source.calendars()
 
 if arguments.list {
-    for source in Set(all.map(\.source)).sorted(by: { $0.title < $1.title }) {
-        print("\(source.title):")
-        for cal in all.filter({ $0.source == source }).sorted(by: { $0.title < $1.title }) {
-            let kind = cal.isSubscribed ? "subscribed" : (cal.allowsContentModifications ? "" : "read-only")
-            print("  \(cal.title.padding(toLength: 28, withPad: " ", startingAt: 0)) \(cal.calendarIdentifier) \(kind)")
-        }
+    var lastSource = ""
+    for cal in all {
+        if cal.source != lastSource { print("\(cal.source):"); lastSource = cal.source }
+        let kind = cal.isSubscribed ? "subscribed" : (cal.isReadOnly ? "read-only" : "")
+        print("  \(cal.title.padding(toLength: 28, withPad: " ", startingAt: 0)) \(cal.id) \(kind)")
     }
     exit(0)
 }
 
-var chosen: [CalendarBuilder.MacCalendar] = []
-var ekCalendars: [EKCalendar] = []
+var settings = CalendarSyncSettings(enabled: true, daysBack: arguments.back, daysAhead: arguments.ahead)
 for spec in arguments.calendars {
-    let matches = all.filter { $0.calendarIdentifier == spec.name || $0.title == spec.name }
+    let matches = all.filter { $0.id == spec.name || $0.title == spec.name }
     guard !matches.isEmpty else { fail("no calendar named \"\(spec.name)\" (see --list)") }
     guard matches.count == 1 else {
         fail("\"\(spec.name)\" names \(matches.count) calendars; use the identifier from --list: "
-             + matches.map { "\($0.calendarIdentifier) (\($0.source.title))" }.joined(separator: ", "))
+             + matches.map { "\($0.id) (\($0.source))" }.joined(separator: ", "))
     }
-    chosen.append(.init(id: matches[0].calendarIdentifier, title: matches[0].title, category: spec.category))
-    ekCalendars.append(matches[0])
+    settings.calendars.append(.init(id: matches[0].id, title: matches[0].title, category: spec.category))
 }
 
-let now = Date()
-let windowStart = Calendar.current.date(byAdding: .day, value: -arguments.back, to: Calendar.current.startOfDay(for: now))!
-let windowEnd = Calendar.current.date(byAdding: .day, value: arguments.ahead, to: Calendar.current.startOfDay(for: now))!
-let predicate = store.predicateForEvents(withStart: windowStart, end: windowEnd, calendars: ekCalendars)
-let events = store.events(matching: predicate).map(macEvent)
-
-let builder = CalendarBuilder(options: .init(
-    homeZone: .current, windowStart: windowStart, windowEnd: windowEnd, calendars: chosen,
-    startOfWeek: Calendar.current.firstWeekday == 2 ? 1 : 0))
-let (database, report) = builder.build(events)
+let run: CalendarSyncRun
+do {
+    run = try CalendarSyncRun(settings: settings, source: source)
+} catch CalendarSyncRun.Failure.doesNotReadBack {
+    fail("the built database does not read back as built")
+}
+let report = run.report
 
 let tzdata = (try? String(contentsOfFile: "/usr/share/zoneinfo/+VERSION", encoding: .utf8))?
     .trimmingCharacters(in: .whitespacesAndNewlines) ?? "unknown"
 let dayFormat = DateFormatter()
 dayFormat.dateFormat = "yyyy-MM-dd"
-print("window:     \(dayFormat.string(from: windowStart)) to \(dayFormat.string(from: windowEnd)), home zone \(TimeZone.current.identifier), tzdata \(tzdata)")
-print("calendars:  \(chosen.map(\.title).joined(separator: ", "))")
+print("window:     \(dayFormat.string(from: run.windowStart)) to \(dayFormat.string(from: run.windowEnd)), home zone \(TimeZone.current.identifier), tzdata \(tzdata)")
+print("calendars:  \(settings.calendars.map(\.title).joined(separator: ", "))")
 print("categories: \(report.categories.joined(separator: ", "))")
-print("records:    \(report.records) (\(events.count) occurrences on the Mac: \(report.seriesMapped) series as repeat rules with \(report.exceptions) exceptions, \(report.seriesExpanded) series expanded, \(report.detachedOccurrences) edited occurrences, \(report.duplicatesDropped) duplicates dropped)")
+print("records:    \(report.records) (\(run.occurrences) occurrences on the Mac: \(report.seriesMapped) series as repeat rules with \(report.exceptions) exceptions, \(report.seriesExpanded) series expanded, \(report.detachedOccurrences) edited occurrences, \(report.duplicatesDropped) duplicates dropped)")
 for warning in report.warnings { print("warning:    \(warning)") }
 
 if arguments.dryRun {
     print("")
-    for record in database.records.prefix(40) {
+    for record in run.database.records.prefix(40) {
         let event = try CalendarEvent(data: record.data)
         let time = event.time.map { String(format: "%02d:%02d-%02d:%02d", $0.start.hour, $0.start.minute, $0.end.hour, $0.end.minute) } ?? "all day    "
         let rule = event.repeatRule.map { describe($0, exceptions: event.exceptions.count) } ?? ""
         print("  \(event.date.year)-\(String(format: "%02d-%02d", event.date.month, event.date.day)) \(time)  [\(report.categories[record.category])] \(event.title ?? "")\(rule)")
     }
-    if database.records.count > 40 { print("  … \(database.records.count - 40) more") }
+    if run.database.records.count > 40 { print("  … \(run.database.records.count - 40) more") }
     exit(0)
 }
 
-// what was built must read back as it was meant, before it goes anywhere near a Palm
-let image = database.encode()
-let check = try PalmDatabase(data: image)
-guard check == database, check.records.count == report.records else { fail("the built database does not read back as built") }
-for record in check.records {
-    guard let event = try? CalendarEvent(data: record.data), event.encode() == record.data else {
-        fail("record \(record.uniqueID) does not decode as written")
-    }
-}
-_ = try CalendarAppInfo(data: check.appInfo!)
-
 let url = arguments.outputURL!
-try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-try image.write(to: url, options: .atomic)
-print("wrote:      \(url.path) (\(image.count) bytes, verified)")
+let bytes = try run.write(to: url)
+print("wrote:      \(url.path) (\(bytes) bytes, verified)")

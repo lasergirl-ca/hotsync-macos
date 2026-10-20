@@ -32,12 +32,21 @@ let package = Package(
             path: "Tests/PalmSyncTests",
             resources: [.copy("Fixtures")]
         ),
+        // The Mac's side of the PIM sync: EventKit (Calendar.app) as MacEvents
+        // and the build of the Palm database from them, shared by the app and
+        // the command-line tool
+        .target(
+            name: "PalmSyncMac",
+            dependencies: ["PalmSync"],
+            path: "Sources/PalmSyncMac",
+            linkerSettings: [.linkedFramework("EventKit")]
+        ),
         // Phase 2 of the PIM sync: Calendar.app to CalendarDB-PDat, as a
         // command-line tool; the Info.plist is linked in for the Calendar
         // access prompt
         .executableTarget(
             name: "palmsync-calendar",
-            dependencies: ["PalmSync"],
+            dependencies: ["PalmSync", "PalmSyncMac"],
             path: "Sources/palmsync-calendar",
             linkerSettings: [
                 .linkedFramework("EventKit"),
@@ -54,7 +63,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "HotSync",
-            dependencies: ["HotSyncCore"],
+            dependencies: ["HotSyncCore", "PalmSync", "PalmSyncMac"],
             path: "Sources/HotSync",
             linkerSettings: [
                 .linkedFramework("AppKit"),
@@ -62,6 +71,7 @@ let package = Package(
                 .linkedFramework("IOKit"),
                 .linkedFramework("CoreServices"),
                 .linkedFramework("UserNotifications"),
+                .linkedFramework("EventKit"),
             ]
         )
     ]

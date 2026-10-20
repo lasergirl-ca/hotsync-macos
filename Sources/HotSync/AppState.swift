@@ -2,6 +2,8 @@ import AppKit
 import Foundation
 import HotSyncCore
 import Observation
+import PalmSync
+import PalmSyncMac
 
 /// Steuert alle Sitzungen: welche Tabs an welchem Anschluss lauschen, welcher
 /// Palm zu welchem Tab gehört, und den Ablauf der Ketten.
@@ -18,6 +20,8 @@ import Observation
 final class AppState {
     let deviceManager = DeviceManager()
     let tabStore = TabStore()
+    /// Calendar.app für den Kalender-Abgleich; eine Instanz, sie hält die Freigabe
+    let calendarSource = CalendarSource()
     let portMonitor = PortMonitor()
 
     private(set) var queues: [UUID: InstallQueue] = [:]
@@ -588,8 +592,12 @@ final class AppState {
         var rejection: TabStatus.Rejection?
         /// Ablauf einer angenommenen Sitzung: zurückspielen (falls angefragt),
         /// die Warteschlange installieren, sichern (falls eingeschaltet)
-        enum Stage { case restoring, installing, backingUp, dumpingROM }
+        enum Stage { case restoring, installing, backingUp, readingCalendar, dumpingROM }
         var stage: Stage = .installing
+        /// nach der Sicherung: CalendarDB-PDat vom Palm lesen und prüfen
+        var calendarCheck = false
+        var calendarAppInfo: Data?
+        var calendarRecords: [PalmRecordIn] = []
         var restoreFiles: [URL] = []
         var restoreDone = 0
         var restoreFailed = 0
@@ -775,6 +783,32 @@ final class AppState {
             if let tabId = session.tabId { tabLog(tabId, L10n.logROMFailed(message)) }
             endSession(session)
 
+        // Kalenderprüfung: Datenbank öffnen, AppInfo und alle Datensätze lesen, schließen
+        case .dbOpened where session.stage == .readingCalendar:
+            session.runner.send("readappinfo")
+        case .appInfo(let data) where session.stage == .readingCalendar:
+            session.calendarAppInfo = data
+            session.runner.send("readall")
+        case .record(let id, _, let attrs, let category, let data) where session.stage == .readingCalendar:
+            session.calendarRecords.append(PalmRecordIn(id: id, attributes: attrs, category: category, data: data))
+            if let tabId = session.tabId, let user = session.user, session.calendarRecords.count % 10 == 0 {
+                statuses[tabId]?.phase = .readingCalendar(user: user, done: session.calendarRecords.count)
+            }
+        case .recordsDone where session.stage == .readingCalendar:
+            calendarRead(session)
+            session.runner.send("closedb")
+        case .dbClosed where session.stage == .readingCalendar:
+            afterCalendarCheck(session)
+        case .error(let stage, let message) where session.stage == .readingCalendar
+            && ["opendb", "readappinfo", "readall", "closedb"].contains(stage):
+            // die Prüfung scheitert, die Sitzung selbst ist heil
+            if let tabId = session.tabId { tabLog(tabId, L10n.logCalendarCheckFailed(stage, message)) }
+            if stage == "opendb" || stage == "closedb" {
+                afterCalendarCheck(session)
+            } else {
+                session.runner.send("closedb")
+            }
+
         case .error(let stage, let message):
             session.errorMessage = "\(stage): \(message)"
             DebugLog.shared.log(L10n.logSessionError(portLabel(port), stage, message), source: "Session")
@@ -782,10 +816,18 @@ final class AppState {
 
         case .syncInfo, .dbOpened, .dbClosed, .appInfo, .appInfoWritten, .record, .recordsDone,
              .recordWritten, .recordDeleted, .flagsReset, .cleanedUp, .syncInfoWritten:
-            // Datensatzzugriff für den PIM-Abgleich: die App schickt diese
-            // Anweisungen noch nicht, die Ereignisse gehören dem Abgleich
+            // Datensatzzugriff außerhalb der Kalenderprüfung: gehört dem
+            // Abgleich, den die App noch nicht fährt
             break
         }
+    }
+
+    // MARK: - Kalender-Abgleich
+
+    func setCalendarSync(_ settings: CalendarSyncSettings, for profileId: UUID) {
+        guard var profile = deviceManager.profile(profileId) else { return }
+        profile.calendarSync = settings
+        deviceManager.updateProfile(profile)
     }
 
     /// Ein Palm hat sich gemeldet: gehört er hierher - und zu welchem Profil?
@@ -863,6 +905,10 @@ final class AppState {
         // Das Fenster zeigt den Tab, der gerade synct
         selectedTabId = tabId
 
+        if let settings = deviceManager.profile(profileId)?.calendarSync, settings.enabled {
+            queueCalendar(settings, profileId: profileId, tabId: tabId, queue: queue)
+            session.calendarCheck = true
+        }
         let files = queue.pendingFiles
         session.files = files
         queue.beginInstall(files, session: session.token)
@@ -941,6 +987,25 @@ final class AppState {
         }
     }
 
+    /// Baut CalendarDB-PDat aus Calendar.app und legt es in die Warteschlange,
+    /// damit es mit diesem HotSync auf den Palm geht.
+    private func queueCalendar(_ settings: CalendarSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue) {
+        guard let profile = deviceManager.profile(profileId) else { return }
+        do {
+            let run = try CalendarSyncRun(settings: settings, source: calendarSource)
+            let url = deviceManager.installDirectory(for: profile)
+                .appendingPathComponent("\(CalendarBuilder.databaseName).pdb")
+            let bytes = try run.write(to: url)
+            queue.refresh()
+            tabLog(tabId, L10n.logCalendarQueued(run.report.records, run.report.seriesMapped, bytes))
+            for warning in run.report.warnings { tabLog(tabId, L10n.logCalendarWarning(warning)) }
+        } catch CalendarSyncRun.Failure.noAccess {
+            tabLog(tabId, L10n.logCalendarNoAccess)
+        } catch {
+            tabLog(tabId, L10n.logCalendarFailed(error.localizedDescription))
+        }
+    }
+
     /// Alle Dateien sind durch: sichern, falls eingeschaltet.
     private func installsDone(_ session: Session) {
         guard session.backupEnabled, let profileId = session.profileId,
@@ -955,8 +1020,40 @@ final class AppState {
         session.runner.send("backup \(directory.path)")
     }
 
-    /// Nach der Sicherung: das ROM auslesen, falls angefragt, sonst Ende.
+    /// Nach der Sicherung: den Kalender auf dem Palm prüfen, falls er
+    /// abgeglichen wird, dann das ROM.
     private func afterBackup(_ session: Session) {
+        guard session.calendarCheck, let tabId = session.tabId, let user = session.user else {
+            afterCalendarCheck(session)
+            return
+        }
+        session.stage = .readingCalendar
+        statuses[tabId]?.phase = .readingCalendar(user: user, done: 0)
+        tabLog(tabId, L10n.logCalendarChecking)
+        session.runner.send("opendb r \(CalendarBuilder.databaseName)")
+    }
+
+    /// Der Kalender ist vom Palm gelesen: jeden Datensatz durch den Codec
+    /// und zurück - was nicht Byte für Byte übereinstimmt, steht im Log.
+    private func calendarRead(_ session: Session) {
+        guard let tabId = session.tabId else { return }
+        var identical = 0, different = 0, deleted = 0
+        for record in session.calendarRecords {
+            if record.isDeleted { deleted += 1; continue }
+            if (try? CalendarEvent(data: record.data))?.encode() == record.data {
+                identical += 1
+            } else {
+                different += 1
+                tabLog(tabId, L10n.logCalendarRecordDiffers(record.id, record.data.count,
+                                                              record.data.prefix(24).map { String(format: "%02x", $0) }.joined(separator: " ")))
+            }
+        }
+        let categories = session.calendarAppInfo.flatMap { try? CalendarAppInfo(data: $0) }?.categories.named.map(\.name) ?? []
+        tabLog(tabId, L10n.logCalendarChecked(session.calendarRecords.count, identical, different, deleted, categories))
+    }
+
+    /// Nach der Kalenderprüfung: das ROM auslesen, falls angefragt, sonst Ende.
+    private func afterCalendarCheck(_ session: Session) {
         guard session.romRequested, let profileId = session.profileId,
               let profile = deviceManager.profile(profileId), let tabId = session.tabId else {
             endSession(session)
