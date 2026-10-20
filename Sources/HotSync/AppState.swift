@@ -779,6 +779,12 @@ final class AppState {
             session.errorMessage = "\(stage): \(message)"
             DebugLog.shared.log(L10n.logSessionError(portLabel(port), stage, message), source: "Session")
             if let tabId = session.tabId { tabLog(tabId, L10n.logSessionError(portLabel(port), stage, message)) }
+
+        case .syncInfo, .dbOpened, .dbClosed, .appInfo, .appInfoWritten, .record, .recordsDone,
+             .recordWritten, .recordDeleted, .flagsReset, .cleanedUp, .syncInfoWritten:
+            // Datensatzzugriff für den PIM-Abgleich: die App schickt diese
+            // Anweisungen noch nicht, die Ereignisse gehören dem Abgleich
+            break
         }
     }
 
