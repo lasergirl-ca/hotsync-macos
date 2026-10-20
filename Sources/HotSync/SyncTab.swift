@@ -58,10 +58,11 @@ struct SyncTab: Codable, Identifiable, Equatable {
 /// "Abgleichen" ist der PIM-Abgleich (Kalender, Kontakte), wie im Profil
 /// eingestellt; "Installieren" die Warteschlange; "Sichern" die Sicherung.
 enum HotSyncMode: String, Codable, CaseIterable, Equatable {
+    // in der Reihenfolge des Menüs
     case syncInstallBackup
-    case syncOnly
     case installBackup
     case installOnly
+    case syncOnly
 
     var syncs: Bool { self == .syncInstallBackup || self == .syncOnly }
     var installs: Bool { self != .syncOnly }
