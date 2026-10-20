@@ -22,6 +22,7 @@ let package = Package(
         // Contacts, Tasks), no UI, unit-tested against golden .pdb fixtures
         .target(
             name: "PalmSync",
+            dependencies: ["HotSyncCore"],   // the session events of hotsync-session
             path: "Sources/PalmSync"
         ),
         .testTarget(
@@ -43,6 +44,13 @@ let package = Package(
                 .unsafeFlags(["-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist",
                               "-Xlinker", Context.packageDirectory + "/Resources/palmsync-calendar-Info.plist"]),
             ]
+        ),
+        // Live check of the record bridge against a Palm: reads a database
+        // through hotsync-session and round-trips it through the codecs
+        .executableTarget(
+            name: "palmsync-probe",
+            dependencies: ["PalmSync", "HotSyncCore"],
+            path: "Sources/palmsync-probe"
         ),
         .executableTarget(
             name: "HotSync",
