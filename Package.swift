@@ -26,9 +26,23 @@ let package = Package(
         ),
         .testTarget(
             name: "PalmSyncTests",
-            dependencies: ["PalmSync"],
+            // HotSyncCore: the install queue's file check must accept what the builder writes
+            dependencies: ["PalmSync", "HotSyncCore"],
             path: "Tests/PalmSyncTests",
             resources: [.copy("Fixtures")]
+        ),
+        // Phase 2 of the PIM sync: Calendar.app to CalendarDB-PDat, as a
+        // command-line tool; the Info.plist is linked in for the Calendar
+        // access prompt
+        .executableTarget(
+            name: "palmsync-calendar",
+            dependencies: ["PalmSync"],
+            path: "Sources/palmsync-calendar",
+            linkerSettings: [
+                .linkedFramework("EventKit"),
+                .unsafeFlags(["-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist",
+                              "-Xlinker", Context.packageDirectory + "/Resources/palmsync-calendar-Info.plist"]),
+            ]
         ),
         .executableTarget(
             name: "HotSync",
