@@ -10,7 +10,6 @@ struct ContactSyncSection: View {
 
     @State private var containers: [ContactSource.Container] = []
     @State private var accessStatus: CNAuthorizationStatus = .notDetermined
-    @State private var preview: String?
     @State private var showContainers = false
 
     private var settings: ContactSyncSettings {
@@ -61,7 +60,6 @@ struct ContactSyncSection: View {
             Label(L10n.contactSyncTitle, systemImage: "person.crop.circle")
         }
         .onAppear { refreshAccess() }
-        .task(id: settings) { await computePreview() }
     }
 
     private var containerList: some View {
@@ -94,7 +92,7 @@ struct ContactSyncSection: View {
                 Text(L10n.contactSyncNoContainers)
             } else {
                 Text(settings.containers.map(\.title).joined(separator: ", "))
-                if let preview { Text("· " + preview) }
+                if let preview = appState.contactPreview(for: profileId) { Text("· " + preview) }
             }
         }
         .font(.caption)
@@ -115,20 +113,7 @@ struct ContactSyncSection: View {
         Task {
             _ = try? await appState.contactSource.requestAccess()
             refreshAccess()
+            appState.refreshContactPreview(for: profileId)
         }
-    }
-
-    private func computePreview() async {
-        guard accessStatus == .authorized, !settings.containers.isEmpty else {
-            preview = nil
-            return
-        }
-        let settings = self.settings
-        let source = appState.contactSource
-        let text: String? = await Task.detached {
-            guard let run = try? ContactSyncRun(settings: settings, source: source) else { return nil }
-            return L10n.contactSyncPreview(run.report.records, run.report.categories.count - 1, run.report.duplicatesDropped)
-        }.value
-        preview = text
     }
 }

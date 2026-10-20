@@ -830,12 +830,68 @@ final class AppState {
         guard var profile = deviceManager.profile(profileId) else { return }
         profile.calendarSync = settings
         deviceManager.updateProfile(profile)
+        refreshCalendarPreview(for: profileId)
     }
 
     func setContactSync(_ settings: ContactSyncSettings, for profileId: UUID) {
         guard var profile = deviceManager.profile(profileId) else { return }
         profile.contactSync = settings
         deviceManager.updateProfile(profile)
+        refreshContactPreview(for: profileId)
+    }
+
+    /// Was der nächste HotSync tragen würde, je Profil - einmal gerechnet,
+    /// wenn sich die Einstellungen ändern, nicht bei jedem Zeichnen der View
+    private(set) var calendarPreviews: [UUID: String] = [:]
+    private(set) var contactPreviews: [UUID: String] = [:]
+    private var previewTasks: [String: Task<Void, Never>] = [:]
+
+    func calendarPreview(for profileId: UUID) -> String? {
+        if calendarPreviews[profileId] == nil { refreshCalendarPreview(for: profileId) }
+        return calendarPreviews[profileId]
+    }
+
+    func contactPreview(for profileId: UUID) -> String? {
+        if contactPreviews[profileId] == nil { refreshContactPreview(for: profileId) }
+        return contactPreviews[profileId]
+    }
+
+    func refreshCalendarPreview(for profileId: UUID) {
+        let key = "calendar-\(profileId)"
+        previewTasks[key]?.cancel()
+        guard let settings = deviceManager.profile(profileId)?.calendarSync, !settings.calendars.isEmpty,
+              calendarSource.hasAccess else {
+            calendarPreviews[profileId] = nil
+            return
+        }
+        let source = calendarSource
+        previewTasks[key] = Task { [weak self] in
+            let text: String? = await Task.detached {
+                guard let run = try? CalendarSyncRun(settings: settings, source: source) else { return nil }
+                return L10n.calendarSyncPreview(run.report.records, run.report.seriesMapped, run.report.seriesExpanded)
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.calendarPreviews[profileId] = text
+        }
+    }
+
+    func refreshContactPreview(for profileId: UUID) {
+        let key = "contacts-\(profileId)"
+        previewTasks[key]?.cancel()
+        guard let settings = deviceManager.profile(profileId)?.contactSync, !settings.containers.isEmpty,
+              contactSource.hasAccess else {
+            contactPreviews[profileId] = nil
+            return
+        }
+        let source = contactSource
+        previewTasks[key] = Task { [weak self] in
+            let text: String? = await Task.detached {
+                guard let run = try? ContactSyncRun(settings: settings, source: source) else { return nil }
+                return L10n.contactSyncPreview(run.report.records, run.report.categories.count - 1, run.report.duplicatesDropped)
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.contactPreviews[profileId] = text
+        }
     }
 
     /// Ein Palm hat sich gemeldet: gehört er hierher - und zu welchem Profil?

@@ -11,7 +11,6 @@ struct CalendarSyncSection: View {
 
     @State private var calendars: [CalendarSource.Calendar] = []
     @State private var accessStatus: EKAuthorizationStatus = .notDetermined
-    @State private var preview: String?
     @State private var showCalendars = false
 
     private var settings: CalendarSyncSettings {
@@ -62,7 +61,6 @@ struct CalendarSyncSection: View {
             Label(L10n.calendarSyncTitle, systemImage: "calendar")
         }
         .onAppear { refreshAccess() }
-        .task(id: settings) { await computePreview() }
     }
 
     private var calendarList: some View {
@@ -120,7 +118,7 @@ struct CalendarSyncSection: View {
                 Text(L10n.calendarSyncNoCalendars)
             } else {
                 Text(settings.calendars.map { $0.category ?? $0.title }.joined(separator: ", "))
-                if let preview {
+                if let preview = appState.calendarPreview(for: profileId) {
                     Text("· " + preview)
                 }
             }
@@ -145,20 +143,7 @@ struct CalendarSyncSection: View {
         Task {
             _ = try? await appState.calendarSource.requestAccess()
             refreshAccess()
+            appState.refreshCalendarPreview(for: profileId)
         }
-    }
-
-    private func computePreview() async {
-        guard accessStatus == .fullAccess, !settings.calendars.isEmpty else {
-            preview = nil
-            return
-        }
-        let settings = self.settings
-        let source = appState.calendarSource
-        let text: String? = await Task.detached {
-            guard let run = try? CalendarSyncRun(settings: settings, source: source) else { return nil }
-            return L10n.calendarSyncPreview(run.report.records, run.report.seriesMapped, run.report.seriesExpanded)
-        }.value
-        preview = text
     }
 }

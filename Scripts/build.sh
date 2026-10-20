@@ -15,6 +15,14 @@ APP_BUNDLE="$PROJECT_DIR/$APP_NAME.app"
 PILOT_PREFIX="$BUILD_DIR/pilot-link/install"
 SESSION_TOOL="$BUILD_DIR/release/hotsync-session"
 
+# Signatur: CODESIGN_IDENTITY, sonst .signing-identity (von make-signing-identity.sh),
+# sonst ad hoc ("-"). Ad hoc heißt: jeder Build ist für macOS eine neue App, und die
+# Freigaben für Kalender und Kontakte sind nach jedem Build weg.
+if [ -z "${CODESIGN_IDENTITY:-}" ] && [ -f "$PROJECT_DIR/.signing-identity" ]; then
+    CODESIGN_IDENTITY="$(cat "$PROJECT_DIR/.signing-identity")"
+fi
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
+
 echo "=== HotSync Build ==="
 echo "Projekt: $PROJECT_DIR"
 echo ""
@@ -128,7 +136,7 @@ done
 
 # Nach install_name_tool sind die Signaturen ungültig: jede Datei einzeln ad hoc neu signieren
 for BIN in "$FRAMEWORKS"/*.dylib "$APP_BUNDLE/Contents/Resources/hotsync-session"; do
-    [ -f "$BIN" ] && codesign --force --sign - "$BIN" 2>&1
+    [ -f "$BIN" ] && codesign --force --sign "$CODESIGN_IDENTITY" "$BIN" 2>&1
 done
 
 # Lizenzen der eingebetteten Bibliotheken mitliefern
@@ -150,9 +158,9 @@ if [ -n "$LEAKS" ]; then
 fi
 echo "      Alle Verweise zeigen auf das Bundle (@rpath) oder das System"
 
-# 5. Code-Signing (ad-hoc)
-echo "[5/6] Code-Signing (ad-hoc)..."
-codesign --deep --force --sign - \
+# 5. Code-Signing
+echo "[5/6] Code-Signing ($CODESIGN_IDENTITY)..."
+codesign --deep --force --sign "$CODESIGN_IDENTITY" \
     --entitlements "$PROJECT_DIR/Resources/Entitlements.plist" \
     "$APP_BUNDLE" 2>&1
 echo "      Signiert"

@@ -4,3 +4,4 @@ HotSync.app/
 *.prc
 *.pdb
 !Tests/*/Fixtures/*.pdb
+.signing-identity
