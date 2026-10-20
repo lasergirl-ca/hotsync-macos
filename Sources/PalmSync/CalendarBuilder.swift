@@ -62,6 +62,29 @@ public struct CalendarBuilder {
         public var warnings: [String] = []
     }
 
+    /// One thing the Palm gets a record for: a series, a single event, an
+    /// occurrence edited on its own, or an occurrence of a rule the Palm
+    /// cannot express. The sync engine matches these against the mirror.
+    public struct MacItem: Equatable, Sendable {
+        public var key: MacKey
+        public var calendarID: String
+        public var category: String
+        /// The record without a category; the rule and exceptions are set
+        /// for a series.
+        public var event: CalendarEvent
+        /// An occurrence of a rule the Palm cannot express: the Mac owns it
+        /// and Palm edits are undone.
+        public var macOwned: Bool
+
+        public init(key: MacKey, calendarID: String, category: String, event: CalendarEvent, macOwned: Bool = false) {
+            self.key = key
+            self.calendarID = calendarID
+            self.category = category
+            self.event = event
+            self.macOwned = macOwned
+        }
+    }
+
     public static let databaseName = "CalendarDB-PDat"
     public static let maxCategories = 16   // including Unfiled
     public static let overflowCategory = "Other"
@@ -78,14 +101,50 @@ public struct CalendarBuilder {
 
     // MARK: Building
 
+    /// The Palm categories for the calendars, "Unfiled" first.
+    public var categories: CategoryAppInfo {
+        var report = Report()
+        return assignCategories(&report).0
+    }
+
     public func build(_ events: [MacEvent]) -> (database: PalmDatabase, report: Report) {
+        var (items, report) = self.items(events)
+        let categories = self.categories
+        let names = categories.names
+
+        // the Datebook expects its records sorted by date and time
+        items.sort { a, b in
+            if a.event.date != b.event.date { return a.event.date < b.event.date }
+            switch (a.event.time?.start, b.event.time?.start) {
+            case (nil, nil): return false
+            case (nil, _): return true      // timeless first
+            case (_, nil): return false
+            case let (x?, y?): return x < y
+            }
+        }
+
+        var db = PalmDatabase(name: Self.databaseName, type: "DATA", creator: "PDat",
+                              appInfo: CalendarAppInfo(categories: categories, startOfWeek: options.startOfWeek).encode())
+        db.records = items.enumerated().map { i, item in
+            PalmDatabase.Record(category: names.firstIndex(of: item.category) ?? 0, uniqueID: UInt32(i + 1),
+                                data: item.event.encode())
+        }
+        db.uniqueIDSeed = UInt32(items.count + 1)
+        report.records = items.count
+        return (db, report)
+    }
+
+    /// The Mac's events as Palm items, in order of first appearance.
+    public func items(_ events: [MacEvent]) -> (items: [MacItem], report: Report) {
         var report = Report()
         let (categories, categoryOf) = assignCategories(&report)
+        report.categories = categories.named.map(\.name)
         let kept = dropDuplicates(events, &report)
 
-        var records: [(date: PalmDate, time: PalmTime?, event: CalendarEvent, category: Int)] = []
-        func add(_ event: CalendarEvent, category: Int) {
-            records.append((event.date, event.time?.start, event, category))
+        var items: [MacItem] = []
+        func add(_ event: CalendarEvent, key: MacKey, calendarID: String, macOwned: Bool = false) {
+            let category = categoryOf[calendarID].map { categories.names[$0] } ?? categories.names[0]
+            items.append(MacItem(key: key, calendarID: calendarID, category: category, event: event, macOwned: macOwned))
         }
 
         // group the occurrences of each series, keep the order of first appearance
@@ -98,10 +157,10 @@ public struct CalendarBuilder {
 
         for id in seriesOrder {
             let occurrences = series[id]!.sorted { $0.start < $1.start }
-            let category = categoryOf[occurrences[0].calendarID] ?? 0
+            let calendarID = occurrences[0].calendarID
 
             guard let rule = occurrences[0].recurrence else {
-                for occurrence in occurrences { add(convert(occurrence), category: category) }
+                for occurrence in occurrences { add(convert(occurrence), key: MacKey(seriesID: id), calendarID: calendarID) }
                 continue
             }
 
@@ -111,7 +170,10 @@ public struct CalendarBuilder {
                 // the Palm cannot express this rule (or every occurrence in
                 // the window was edited): one record per occurrence
                 report.seriesExpanded += 1
-                for occurrence in occurrences { add(convert(occurrence), category: category) }
+                for occurrence in occurrences {
+                    add(convert(occurrence), key: MacKey(seriesID: id, occurrence: occurrence.occurrenceDate ?? occurrence.start),
+                        calendarID: calendarID, macOwned: true)
+                }
                 continue
             }
 
@@ -125,35 +187,17 @@ public struct CalendarBuilder {
                 // the day the rule put the occurrence on, before it was edited
                 let original = PalmDate(occurrence.occurrenceDate ?? occurrence.start, in: calendar)
                 if !exceptions.contains(original) { exceptions.append(original) }
-                add(convert(occurrence), category: category)
+                add(convert(occurrence), key: MacKey(seriesID: id, occurrence: occurrence.occurrenceDate ?? occurrence.start),
+                    calendarID: calendarID)
                 report.detachedOccurrences += 1
             }
             record.exceptions = exceptions.sorted()
             report.exceptions += exceptions.count
             report.seriesMapped += 1
-            add(record, category: category)
+            add(record, key: MacKey(seriesID: id), calendarID: calendarID)
         }
-
-        // the Datebook expects its records sorted by date and time
-        records.sort { a, b in
-            if a.date != b.date { return a.date < b.date }
-            switch (a.time, b.time) {
-            case (nil, nil): return false
-            case (nil, _): return true      // timeless first
-            case (_, nil): return false
-            case let (x?, y?): return x < y
-            }
-        }
-
-        var db = PalmDatabase(name: Self.databaseName, type: "DATA", creator: "PDat",
-                              appInfo: CalendarAppInfo(categories: categories, startOfWeek: options.startOfWeek).encode())
-        db.records = records.enumerated().map { i, r in
-            PalmDatabase.Record(category: r.category, uniqueID: UInt32(i + 1), data: r.event.encode())
-        }
-        db.uniqueIDSeed = UInt32(records.count + 1)
-        report.records = records.count
-        report.categories = categories.named.map(\.name)
-        return (db, report)
+        report.records = items.count
+        return (items, report)
     }
 
     // MARK: Categories

@@ -3,7 +3,7 @@ import Foundation
 /// A calendar date as the Palm packs it into 16 bits:
 /// `(year - 1904) << 9 | month << 5 | day`, month 1-12, day 1-31.
 /// 0xFFFF means "no date" and is represented by nil where it can occur.
-public struct PalmDate: Equatable, Hashable, Comparable, Sendable {
+public struct PalmDate: Equatable, Hashable, Comparable, Codable, Sendable {
     public var year: Int
     public var month: Int
     public var day: Int
@@ -36,7 +36,7 @@ public struct PalmDate: Equatable, Hashable, Comparable, Sendable {
 }
 
 /// A time of day, minute resolution, as the Palm stores it: hour, minute.
-public struct PalmTime: Equatable, Hashable, Comparable, Sendable {
+public struct PalmTime: Equatable, Hashable, Comparable, Codable, Sendable {
     public var hour: Int
     public var minute: Int
 

@@ -155,6 +155,9 @@ private func imageWithVersion(_ version: String?) -> Data {
             == .record(id: 0x1001, index: 0, attributes: 0x40, category: 2, data: Data([9, 0, 10, 0])))
     #expect(SessionEvent.parse(#"{"event":"record","id":4098,"index":1,"attrs":192,"category":0,"data":""}"#)
             == .record(id: 0x1002, index: 1, attributes: 0xC0, category: 0, data: Data()))
+    // archived (0x08) is a flag on the wire, not part of the category
+    #expect(SessionEvent.parse(#"{"event":"record","id":4100,"index":2,"attrs":136,"category":3,"data":""}"#)
+            == .record(id: 0x1004, index: 2, attributes: 0x88, category: 3, data: Data()))
     #expect(SessionEvent.parse(#"{"event":"recordsDone","count":2,"modifiedOnly":1}"#)
             == .recordsDone(count: 2, modifiedOnly: true))
     #expect(SessionEvent.parse(#"{"event":"recordWritten","id":4099,"bytes":16}"#) == .recordWritten(id: 4099, bytes: 16))

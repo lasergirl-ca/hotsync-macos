@@ -922,7 +922,9 @@ static void emit_record(recordid_t id, int index, int attrs, int category, const
 	emit_begin("record");
 	emit_int("id", (long)id);
 	emit_int("index", index);
-	emit_int("attrs", attrs & 0xF0);
+	/* alle Marken, auch "archiviert" (0x08): auf dem Draht sind Marken und
+	 * Kategorie getrennt, anders als in der Datei */
+	emit_int("attrs", attrs & 0xF8);
 	emit_int("category", category & 0x0F);
 	emit_base64("data", buf->data, buf->used);
 	emit_end();
@@ -1034,7 +1036,7 @@ static void write_record(int sd, const char *args)
 	if (len < 0)
 		goto usage;
 
-	if (dlp_WriteRecord(sd, open_db, (int)(attrs & 0xF0), (recordid_t)id, (int)(category & 0x0F),
+	if (dlp_WriteRecord(sd, open_db, (int)(attrs & 0xF8), (recordid_t)id, (int)(category & 0x0F),
 			    data, (size_t)len, &new_id) < 0) {
 		emit_dlp_error(sd, "writerec", "cannot write the record");
 		return;

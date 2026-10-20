@@ -54,8 +54,9 @@ public enum SessionEvent: Equatable, Sendable {
     case dbClosed
     case appInfo(Data)
     case appInfoWritten(bytes: Int)
-    /// one record: flags in `attributes` (high nibble, dlpRecAttr*), category
-    /// separate, the data as it is on the Palm (empty for a deleted one)
+    /// one record: flags in `attributes` (dlpRecAttr*: deleted 0x80, dirty
+    /// 0x40, busy 0x20, secret 0x10, archived 0x08), category separate, the
+    /// data as it is on the Palm (empty for a deleted one)
     case record(id: UInt32, index: Int, attributes: UInt8, category: Int, data: Data)
     /// all records asked for have been sent
     case recordsDone(count: Int, modifiedOnly: Bool)
@@ -175,7 +176,7 @@ public enum SessionEvent: Equatable, Sendable {
             return .appInfoWritten(bytes: l.bytes ?? 0)
         case "record":
             guard let id = l.id, let data = l.data.flatMap({ Data(base64Encoded: $0) }) else { return nil }
-            return .record(id: id, index: l.index ?? -1, attributes: UInt8(clamping: l.attrs ?? 0) & 0xF0,
+            return .record(id: id, index: l.index ?? -1, attributes: UInt8(clamping: l.attrs ?? 0) & 0xF8,
                            category: l.category ?? 0, data: data)
         case "recordsDone":
             return .recordsDone(count: l.count ?? 0, modifiedOnly: (l.modifiedOnly ?? 0) != 0)

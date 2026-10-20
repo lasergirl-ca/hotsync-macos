@@ -21,7 +21,7 @@ import Foundation
 ///         location         NUL-terminated                      if 0x02
 ///         blobs            type[4] length[2] data              to the end
 public struct CalendarEvent: Equatable, Sendable {
-    public struct TimeSpan: Equatable, Sendable {
+    public struct TimeSpan: Equatable, Hashable, Codable, Sendable {
         public var start: PalmTime
         public var end: PalmTime
         public init(start: PalmTime, end: PalmTime) {
@@ -30,11 +30,11 @@ public struct CalendarEvent: Equatable, Sendable {
         }
     }
 
-    public enum AlarmUnit: UInt8, Sendable {
+    public enum AlarmUnit: UInt8, Codable, Sendable {
         case minutes = 0, hours = 1, days = 2
     }
 
-    public struct Alarm: Equatable, Sendable {
+    public struct Alarm: Equatable, Hashable, Codable, Sendable {
         public var advance: UInt8
         public var unit: AlarmUnit
         public init(advance: UInt8, unit: AlarmUnit) {
@@ -43,7 +43,7 @@ public struct CalendarEvent: Equatable, Sendable {
         }
     }
 
-    public enum RepeatType: UInt8, Sendable {
+    public enum RepeatType: UInt8, Codable, Sendable {
         case daily = 1, weekly = 2, monthlyByDay = 3, monthlyByDate = 4, yearly = 5
     }
 
@@ -60,7 +60,7 @@ public struct CalendarEvent: Equatable, Sendable {
         public static let saturday = Weekdays(rawValue: 1 << 6)
     }
 
-    public struct Repeat: Equatable, Sendable {
+    public struct Repeat: Equatable, Hashable, Codable, Sendable {
         public var type: RepeatType
         /// nil: repeats forever
         public var endDate: PalmDate?
