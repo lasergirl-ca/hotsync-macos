@@ -515,22 +515,58 @@ enum L10n {
     static func logCalendarFailed(_ reason: String) -> String { s(
         "Kalender nicht gebaut: \(reason)", "Calendar not built: \(reason)"
     ) }
-    static var logCalendarChecking: String { s(
-        "Prüfe CalendarDB-PDat auf dem Palm …", "Checking CalendarDB-PDat on the Palm …"
+    static func logCalendarChecking(_ name: String) -> String { s(
+        "Prüfe \(name) auf dem Palm …", "Checking \(name) on the Palm …"
     ) }
-    static func logCalendarChecked(_ records: Int, _ identical: Int, _ different: Int, _ deleted: Int, _ categories: [String]) -> String { s(
-        "CalendarDB-PDat auf dem Palm: \(records) Datensätze, \(identical) lesbar, \(different) abweichend, \(deleted) gelöscht; Kategorien: \(categories.joined(separator: ", "))",
-        "CalendarDB-PDat on the Palm: \(records) records, \(identical) decode, \(different) differ, \(deleted) deleted; categories: \(categories.joined(separator: ", "))"
+    static func logCalendarChecked(_ name: String, _ records: Int, _ identical: Int, _ different: Int, _ deleted: Int, _ categories: [String]) -> String { s(
+        "\(name) auf dem Palm: \(records) Datensätze, \(identical) lesbar, \(different) abweichend, \(deleted) gelöscht; Kategorien: \(categories.joined(separator: ", "))",
+        "\(name) on the Palm: \(records) records, \(identical) decode, \(different) differ, \(deleted) deleted; categories: \(categories.joined(separator: ", "))"
+    ) }
+    static var contactSyncTitle: String { s("Kontakte: Mac → Palm", "Contacts: Mac → Palm") }
+    static var contactSyncToggle: String { s("Kontakte abgleichen", "Sync Contacts") }
+    static var contactSyncChoose: String { s("Konten wählen", "Choose accounts") }
+    static var contactSyncWarning: String { s(
+        "Die Kontakte des Palms werden dabei ersetzt: Einträge, die auf dem Palm geändert wurden, gehen verloren.",
+        "The Palm's contacts are replaced: entries edited on the Palm are lost."
+    ) }
+    static var contactSyncAllow: String { s("Zugriff auf Kontakte erlauben …", "Allow access to Contacts …") }
+    static var contactSyncDenied: String { s(
+        "Kein Zugriff auf Kontakte: in den Systemeinstellungen unter Datenschutz & Sicherheit › Kontakte erlauben",
+        "No access to Contacts: allow it in System Settings under Privacy & Security › Contacts"
+    ) }
+    static var contactSyncGroupsHint: String { s(
+        "Gruppen werden Kategorien auf dem Palm (bis 15); Notizen bleiben auf dem Mac, macOS gibt sie nicht heraus.",
+        "Groups become categories on the Palm (up to 15); notes stay on the Mac, macOS does not hand them out."
+    ) }
+    static var contactSyncNoContainers: String { s("Noch kein Konto gewählt", "No account chosen yet") }
+    static func contactSyncPreview(_ records: Int, _ categories: Int, _ duplicates: Int) -> String { s(
+        "\(records) Kontakte beim nächsten HotSync (\(categories) Kategorien, \(duplicates) doppelte weggelassen)",
+        "\(records) contacts at the next HotSync (\(categories) categories, \(duplicates) duplicates dropped)"
+    ) }
+    static func logContactsQueued(_ records: Int, _ categories: Int, _ bytes: Int) -> String { s(
+        "Kontakte gebaut: \(records) Einträge (\(categories) Kategorien), ContactsDB-PAdd.pdb (\(bytes) Bytes) in der Warteschlange",
+        "Contacts built: \(records) records (\(categories) categories), ContactsDB-PAdd.pdb (\(bytes) bytes) queued"
+    ) }
+    static func logContactsWarning(_ text: String) -> String { s("Kontakte: \(text)", "Contacts: \(text)") }
+    static var logContactsNoAccess: String { s(
+        "Kontakte nicht gebaut: kein Zugriff auf Kontakte", "Contacts not built: no access to Contacts"
+    ) }
+    static func logContactsFailed(_ reason: String) -> String { s(
+        "Kontakte nicht gebaut: \(reason)", "Contacts not built: \(reason)"
+    ) }
+    static var logContactsNeedBackup: String { s(
+        "Kontakte noch nicht auf den Palm gespielt: erst muss eine Sicherung dieses Palms da sein (dieser HotSync legt sie an)",
+        "Contacts not put on the Palm yet: a backup of this Palm has to exist first (this HotSync makes it)"
     ) }
     static func logCalendarRecordDiffers(_ id: UInt32, _ bytes: Int, _ hex: String) -> String { s(
         "Datensatz \(id) (\(bytes) Bytes) kommt anders zurück: \(hex) …",
         "Record \(id) (\(bytes) bytes) does not come back the same: \(hex) …"
     ) }
-    static func logCalendarCheckFailed(_ stage: String, _ message: String) -> String { s(
-        "Kalenderprüfung abgebrochen (\(stage): \(message))", "Calendar check stopped (\(stage): \(message))"
+    static func logCalendarCheckFailed(_ name: String, _ stage: String, _ message: String) -> String { s(
+        "Prüfung von \(name) abgebrochen (\(stage): \(message))", "Check of \(name) stopped (\(stage): \(message))"
     ) }
-    static func phaseReadingCalendar(_ name: String, _ done: Int) -> String { s(
-        "Prüfe den Kalender von \(name) … \(done) Datensätze", "Checking \(name)'s calendar … \(done) records"
+    static func phaseReadingCalendar(_ name: String, _ database: String, _ done: Int) -> String { s(
+        "Prüfe \(database) von \(name) … \(done) Datensätze", "Checking \(name)'s \(database) … \(done) records"
     ) }
 
     static func logBackupFinished(_ saved: Int, _ unchanged: Int, _ failed: Int) -> String { s(

@@ -39,7 +39,7 @@ let package = Package(
             name: "PalmSyncMac",
             dependencies: ["PalmSync"],
             path: "Sources/PalmSyncMac",
-            linkerSettings: [.linkedFramework("EventKit")]
+            linkerSettings: [.linkedFramework("EventKit"), .linkedFramework("Contacts")]
         ),
         // Phase 2 of the PIM sync: Calendar.app to CalendarDB-PDat, as a
         // command-line tool; the Info.plist is linked in for the Calendar
@@ -72,6 +72,7 @@ let package = Package(
                 .linkedFramework("CoreServices"),
                 .linkedFramework("UserNotifications"),
                 .linkedFramework("EventKit"),
+                .linkedFramework("Contacts"),
             ]
         )
     ]

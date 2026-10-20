@@ -15,6 +15,8 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     var romVersion: UInt32?
     /// Kalender-Abgleich Mac → Palm: welche Kalender, wie weit; nil = nie eingerichtet
     var calendarSync: CalendarSyncSettings?
+    /// Kontakte-Abgleich Mac → Palm: welche Konten; nil = nie eingerichtet
+    var contactSync: ContactSyncSettings?
 
     var palmOS: PalmOSVersion? { romVersion.map(PalmOSVersion.init(rom:)) }
 

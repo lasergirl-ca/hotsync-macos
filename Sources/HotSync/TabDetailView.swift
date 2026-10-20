@@ -21,6 +21,7 @@ struct TabDetailView: View {
                 }
             }
             CalendarSyncSection(profileId: tab.profileId)
+            ContactSyncSection(profileId: tab.profileId)
             if let queue = appState.queue(for: tab) {
                 QueueSection(queue: queue, profileId: tab.profileId,
                              isSyncing: appState.status(tab.id)?.isSyncing == true)
@@ -230,8 +231,8 @@ struct TabDetailView: View {
             return L10n.phaseRestoring(user.name, done, total, file)
         case .backingUp(let user, let file, let done, let total):
             return L10n.phaseBackingUp(user.name, done, total, file)
-        case .readingCalendar(let user, let done):
-            return L10n.phaseReadingCalendar(user.name, done)
+        case .readingCalendar(let user, let database, let done):
+            return L10n.phaseReadingCalendar(user.name, database, done)
         case .dumpingROM(let user, let done, let total):
             return L10n.phaseDumpingROM(user.name, done, total)
         case .listening:

@@ -29,6 +29,8 @@
     <!-- PIM sync: the Mac's calendars go onto the Palm -->
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>HotSync reads the calendars you choose to put them on your Palm.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>HotSync reads the contacts of the accounts you choose to put them on your Palm.</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>

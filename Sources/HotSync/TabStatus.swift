@@ -18,8 +18,9 @@ final class TabStatus {
         /// nach den Installationen: die Datenbanken im RAM werden gesichert;
         /// `done` von `total` sind durch (geholt oder unverändert)
         case backingUp(user: PalmUser, file: String?, done: Int, total: Int)
-        /// nach der Sicherung: der Kalender wird vom Palm gelesen und geprüft
-        case readingCalendar(user: PalmUser, done: Int)
+        /// nach der Sicherung: eine abgeglichene Datenbank wird vom Palm
+        /// gelesen und geprüft
+        case readingCalendar(user: PalmUser, database: String, done: Int)
         /// zum Schluss: das ROM wird ausgelesen, `done` von `total` Bytes
         case dumpingROM(user: PalmUser, done: Int, total: Int)
     }
