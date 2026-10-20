@@ -77,24 +77,37 @@ public struct PalmTimezone: Equatable, Sendable {
 
     public init(data: Data) throws {
         var r = ByteReader(data)
-        offsetMinutes = Int16(bitPattern: try r.u16())
-        t2 = try r.u8()
-        guard t2 <= 3 else { throw PalmFormatError.invalidValue(field: "tz.t2", value: Int(t2)) }
-        dstStart = try DSTRule.decode(&r)
-        dstEnd = try DSTRule.decode(&r)
+        self = try Self.decode(&r)
+        guard r.isAtEnd else { throw PalmFormatError.trailingBytes(count: r.remaining) }
+    }
+
+    /// Reads a time zone where the reader stands; a location record has
+    /// more fields behind it.
+    static func decode(_ r: inout ByteReader) throws -> PalmTimezone {
+        var tz = PalmTimezone(offsetMinutes: 0, name: "")
+        tz.offsetMinutes = Int16(bitPattern: try r.u16())
+        tz.t2 = try r.u8()
+        guard tz.t2 <= 3 else { throw PalmFormatError.invalidValue(field: "tz.t2", value: Int(tz.t2)) }
+        tz.dstStart = try DSTRule.decode(&r)
+        tz.dstEnd = try DSTRule.decode(&r)
         let observed = try r.u8()
         guard observed == 0x3C || observed == 0 else {
             throw PalmFormatError.invalidValue(field: "tz.dstObserved", value: Int(observed))
         }
-        observesDST = observed == 0x3C
-        t4 = try r.u8()
-        unknown = try r.u8()
-        name = try r.cString()
-        guard r.isAtEnd else { throw PalmFormatError.trailingBytes(count: r.remaining) }
+        tz.observesDST = observed == 0x3C
+        tz.t4 = try r.u8()
+        tz.unknown = try r.u8()
+        tz.name = try r.cString()
+        return tz
     }
 
     public func encode() -> Data {
         var w = ByteWriter()
+        write(&w)
+        return w.data
+    }
+
+    func write(_ w: inout ByteWriter) {
         w.u16(UInt16(bitPattern: offsetMinutes))
         w.u8(t2)
         dstStart.encode(&w)
@@ -103,6 +116,5 @@ public struct PalmTimezone: Equatable, Sendable {
         w.u8(t4)
         w.u8(unknown)
         w.cString(name)
-        return w.data
     }
 }
