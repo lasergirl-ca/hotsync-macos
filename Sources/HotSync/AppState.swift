@@ -905,8 +905,14 @@ final class AppState {
         // Das Fenster zeigt den Tab, der gerade synct
         selectedTabId = tabId
 
-        if let settings = deviceManager.profile(profileId)?.calendarSync, settings.enabled {
-            queueCalendar(settings, profileId: profileId, tabId: tabId, queue: queue)
+        if let profile = deviceManager.profile(profileId), let settings = profile.calendarSync, settings.enabled {
+            // Erst sichern, dann ersetzen: ohne Sicherung dieses Palms geht
+            // sein eigener Kalender nicht auf den Palm-Stand verloren
+            if profile.lastBackupAt == nil {
+                tabLog(tabId, L10n.logCalendarNeedsBackup)
+            } else {
+                queueCalendar(settings, profileId: profileId, tabId: tabId, queue: queue)
+            }
             session.calendarCheck = true
         }
         let files = queue.pendingFiles

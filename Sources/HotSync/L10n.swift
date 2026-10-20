@@ -505,6 +505,10 @@ enum L10n {
         "Calendar built: \(records) records (\(series) series), CalendarDB-PDat.pdb (\(bytes) bytes) queued"
     ) }
     static func logCalendarWarning(_ text: String) -> String { s("Kalender: \(text)", "Calendar: \(text)") }
+    static var logCalendarNeedsBackup: String { s(
+        "Kalender noch nicht auf den Palm gespielt: erst muss eine Sicherung dieses Palms da sein (dieser HotSync legt sie an)",
+        "Calendar not put on the Palm yet: a backup of this Palm has to exist first (this HotSync makes it)"
+    ) }
     static var logCalendarNoAccess: String { s(
         "Kalender nicht gebaut: kein Zugriff auf Kalender", "Calendar not built: no access to Calendar"
     ) }
