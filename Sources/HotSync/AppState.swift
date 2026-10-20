@@ -335,15 +335,15 @@ final class AppState {
         if restore { restoreRequests.insert(profileId) } else { restoreRequests.remove(profileId) }
     }
 
-    func setFullSync(_ enabled: Bool, for tabId: UUID) {
-        guard var tab = tabStore.tab(tabId), tab.isFullSync != enabled else { return }
-        tab.fullSync = enabled
+    func setMode(_ mode: HotSyncMode, for tabId: UUID) {
+        guard var tab = tabStore.tab(tabId), tab.hotSyncMode != mode else { return }
+        tab.hotSyncMode = mode
         saveTab(tab)
     }
 
-    func setFullSyncForAllTabs(_ enabled: Bool) {
-        for var tab in tabStore.tabs where tab.isFullSync != enabled {
-            tab.fullSync = enabled
+    func setModeForAllTabs(_ mode: HotSyncMode) {
+        for var tab in tabStore.tabs where tab.hotSyncMode != mode {
+            tab.hotSyncMode = mode
             tabStore.save(tab)
         }
     }
@@ -965,7 +965,8 @@ final class AppState {
         // Das Fenster zeigt den Tab, der gerade synct
         selectedTabId = tabId
 
-        if let profile = deviceManager.profile(profileId) {
+        let mode = tabStore.tab(tabId)?.hotSyncMode ?? .syncInstallBackup
+        if mode.syncs, let profile = deviceManager.profile(profileId) {
             // Erst sichern, dann ersetzen: ohne Sicherung dieses Palms gehen
             // sein eigener Kalender und seine Kontakte nicht verloren
             if let settings = profile.calendarSync, settings.enabled {
@@ -985,7 +986,10 @@ final class AppState {
                 session.checkDatabases.append(ContactsBuilder.databaseName)
             }
         }
-        let files = queue.pendingFiles
+        // "Nur abgleichen": von der Warteschlange gehen nur die Datenbanken
+        // des Abgleichs auf den Palm, der Rest wartet
+        let synced = [CalendarBuilder.databaseName, ContactsBuilder.databaseName].map { "\($0).pdb" }
+        let files = mode.installs ? queue.pendingFiles : queue.pendingFiles.filter { synced.contains($0.lastPathComponent) }
         session.files = files
         queue.beginInstall(files, session: session.token)
         deviceManager.updateRomVersion(session.romVersion, for: profileId)
@@ -995,7 +999,7 @@ final class AppState {
         session.romRequested = romRequests.remove(profileId) != nil
         // Nach dem Zurückspielen nicht gleich wieder sichern: der Palm hat
         // gerade die Sicherung bekommen
-        session.backupEnabled = (tabStore.tab(tabId)?.isFullSync ?? false) && session.restoreFiles.isEmpty
+        session.backupEnabled = mode.backsUp && session.restoreFiles.isEmpty
         statuses[tabId]?.lastResult = nil
         statuses[tabId]?.lastBackup = nil
         statuses[tabId]?.lastRestore = nil

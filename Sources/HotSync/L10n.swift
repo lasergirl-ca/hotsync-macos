@@ -185,9 +185,20 @@ enum L10n {
     static var tabSyncModeFull: String { s("Installieren + Sichern", "Install + Back Up") }
     static var tabSyncModeInstall: String { s("Nur installieren", "Install Only") }
     static var tabSyncModeHint: String { s(
-        "„Installieren + Sichern“ holt nach den Installationen die Datenbanken im RAM des Palms auf den Mac – beim ersten Mal alle, danach nur die geänderten. Für einen langsamen seriellen Tab kann „Nur installieren“ sinnvoll sein.",
-        "“Install + Back Up” fetches the Palm's RAM databases to the Mac after the installs – all of them the first time, then only the changed ones. For a slow serial tab, “Install Only” can make sense."
+        "„Abgleichen“ ist der Kalender- und Kontakte-Abgleich, wie er im Tab eingestellt ist; „Installieren“ die Warteschlange; „Sichern“ holt nach den Installationen die Datenbanken im RAM des Palms auf den Mac – beim ersten Mal alle, danach nur die geänderten. Für einen langsamen seriellen Tab kann „Nur installieren“ sinnvoll sein.",
+        "“Sync” is the calendar and contacts sync as set up in the tab; “Install” the queue; “Back Up” fetches the Palm's RAM databases to the Mac after the installs – all of them the first time, then only the changed ones. For a slow serial tab, “Install Only” can make sense."
     ) }
+    static func modeName(_ mode: HotSyncMode) -> String {
+        switch mode {
+        case .syncInstallBackup: return s("Abgleichen + Installieren + Sichern", "Sync + Install + Back Up")
+        case .syncOnly: return s("Nur abgleichen", "Sync Only")
+        case .installBackup: return s("Installieren + Sichern", "Install + Back Up")
+        case .installOnly: return s("Nur installieren", "Install Only")
+        }
+    }
+    static func allTabsMode(_ mode: HotSyncMode) -> String {
+        s("Alle Tabs: \(modeName(mode))", "All Tabs: \(modeName(mode))")
+    }
     static var tabAutoListen: String { s("Automatisch lauschen", "Listen automatically") }
     static var tabAutoListenHint: String { s(
         "Der Anschluss wartet ständig auf einen Palm und gibt ihn dem Tab, zu dem er gehört. Ohne: nur per „Jetzt syncen“ oder als Schritt einer Kette.",

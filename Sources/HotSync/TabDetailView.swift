@@ -93,21 +93,23 @@ struct TabDetailView: View {
                     .foregroundStyle(.secondary)
                 Menu {
                     Picker("", selection: Binding(
-                        get: { tab.isFullSync },
-                        set: { appState.setFullSync($0, for: tab.id) }
+                        get: { tab.hotSyncMode },
+                        set: { appState.setMode($0, for: tab.id) }
                     )) {
-                        Text(L10n.tabSyncModeFullShort).tag(true)
-                        Text(L10n.tabSyncModeInstallShort).tag(false)
+                        ForEach(HotSyncMode.allCases, id: \.self) { mode in
+                            Text(L10n.modeName(mode)).tag(mode)
+                        }
                     }
                     .pickerStyle(.inline)
                     .labelsHidden()
                     if appState.tabStore.tabs.count > 1 {
                         Divider()
-                        Button(L10n.allTabsSyncMode(full: true)) { appState.setFullSyncForAllTabs(true) }
-                        Button(L10n.allTabsSyncMode(full: false)) { appState.setFullSyncForAllTabs(false) }
+                        ForEach(HotSyncMode.allCases, id: \.self) { mode in
+                            Button(L10n.allTabsMode(mode)) { appState.setModeForAllTabs(mode) }
+                        }
                     }
                 } label: {
-                    Text(tab.isFullSync ? L10n.tabSyncModeFullShort : L10n.tabSyncModeInstallShort)
+                    Text(L10n.modeName(tab.hotSyncMode))
                 }
                 .menuStyle(.button)
                 .fixedSize()

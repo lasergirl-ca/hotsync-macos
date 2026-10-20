@@ -49,12 +49,10 @@ struct TabEditorView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Picker(L10n.tabSyncMode, selection: Binding(
-                    get: { draft.isFullSync },
-                    set: { draft.fullSync = $0 }
-                )) {
-                    Text(L10n.tabSyncModeFull).tag(true)
-                    Text(L10n.tabSyncModeInstall).tag(false)
+                Picker(L10n.tabSyncMode, selection: $draft.hotSyncMode) {
+                    ForEach(HotSyncMode.allCases, id: \.self) { mode in
+                        Text(L10n.modeName(mode)).tag(mode)
+                    }
                 }
                 Text(L10n.tabSyncModeHint)
                     .font(.caption)

@@ -14,12 +14,22 @@ struct SyncTab: Codable, Identifiable, Equatable {
     /// Lauscht von selbst, sobald der Anschluss frei ist - wie HotSync bis
     /// 1.0.x. Ohne: nur per Start-Knopf oder als Schritt einer Kette.
     var autoListen: Bool
-    /// Vollständiger HotSync: nach den Installationen die Datenbanken im RAM
-    /// sichern. false: nur installieren (z. B. für einen langsamen seriellen
-    /// Tab). nil: vollständig - so wie Tabs von vor dieser Einstellung.
+    /// Von vor der Betriebsart: true/nil "Installieren + Sichern", false
+    /// "Nur installieren". Bleibt in tabs.json für ältere Versionen.
     var fullSync: Bool?
+    /// Was ein HotSync dieses Tabs tut; nil: wie `fullSync` sagt, und der
+    /// PIM-Abgleich läuft mit (er tut nichts, solange er im Profil aus ist)
+    var mode: HotSyncMode?
 
-    var isFullSync: Bool { fullSync ?? true }
+    var hotSyncMode: HotSyncMode {
+        get { mode ?? (fullSync == false ? .installOnly : .syncInstallBackup) }
+        set {
+            mode = newValue
+            fullSync = newValue.backsUp
+        }
+    }
+
+    var isFullSync: Bool { hotSyncMode.backsUp }
 
     init(id: UUID = UUID(), profileId: UUID, port: String, baudRate: Int = SyncTab.defaultBaudRate,
          autoListen: Bool) {
@@ -42,6 +52,20 @@ struct SyncTab: Codable, Identifiable, Equatable {
     var portLabel: String {
         isUSB ? "USB" : (port as NSString).lastPathComponent
     }
+}
+
+/// Die Betriebsart eines Tabs: welche Schritte ein HotSync macht.
+/// "Abgleichen" ist der PIM-Abgleich (Kalender, Kontakte), wie im Profil
+/// eingestellt; "Installieren" die Warteschlange; "Sichern" die Sicherung.
+enum HotSyncMode: String, Codable, CaseIterable, Equatable {
+    case syncInstallBackup
+    case syncOnly
+    case installBackup
+    case installOnly
+
+    var syncs: Bool { self == .syncInstallBackup || self == .syncOnly }
+    var installs: Bool { self != .syncOnly }
+    var backsUp: Bool { self == .syncInstallBackup || self == .installBackup }
 }
 
 /// Eine Kette: Tabs, die nacheinander syncen - "wenn A fertig ist, B, dann C".
