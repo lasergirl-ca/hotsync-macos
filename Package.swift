@@ -18,6 +18,18 @@ let package = Package(
             dependencies: ["HotSyncCore"],
             path: "Tests/HotSyncCoreTests"
         ),
+        // PIM sync: Palm database container and record codecs (Calendar,
+        // Contacts, Tasks), no UI, unit-tested against golden .pdb fixtures
+        .target(
+            name: "PalmSync",
+            path: "Sources/PalmSync"
+        ),
+        .testTarget(
+            name: "PalmSyncTests",
+            dependencies: ["PalmSync"],
+            path: "Tests/PalmSyncTests",
+            resources: [.copy("Fixtures")]
+        ),
         .executableTarget(
             name: "HotSync",
             dependencies: ["HotSyncCore"],
