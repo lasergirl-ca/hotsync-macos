@@ -473,10 +473,7 @@ enum L10n {
     // MARK: - Kalender-Abgleich
 
     static var calendarSyncTitle: String { s("Kalender: Mac → Palm", "Calendar: Mac → Palm") }
-    static var calendarSyncToggle: String { s(
-        "Beim HotSync den Kalender des Macs auf den Palm spielen",
-        "Put the Mac's calendar on the Palm at each HotSync"
-    ) }
+    static var calendarSyncToggle: String { s("Kalender abgleichen", "Sync Calendar") }
     static var calendarSyncChoose: String { s("Kalender wählen", "Choose calendars") }
     static var calendarSyncWarning: String { s(
         "Der Kalender des Palms wird dabei ersetzt: Einträge, die auf dem Palm geändert wurden, gehen verloren.",
