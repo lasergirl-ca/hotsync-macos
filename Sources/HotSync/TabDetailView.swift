@@ -55,14 +55,7 @@ struct TabDetailView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(phaseColor.opacity(0.2))
-                    .frame(width: 36, height: 36)
-                Image(systemName: phaseIcon)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(phaseColor)
-            }
+            SyncLogo(phase: phase, color: phaseColor, icon: phaseIcon)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(appState.title(of: tab))
@@ -689,5 +682,56 @@ struct TabLogSection: View {
                     .foregroundStyle(.tertiary)
             }
         }
+    }
+}
+
+/// Das HotSync-Logo im Kopf des Tabs: die beiden Pfeile drehen sich,
+/// solange ein HotSync läuft; sonst stehen sie, und ein kleines Abzeichen
+/// zeigt den Zustand (lauschen, Anschluss fehlt, …).
+struct SyncLogo: View {
+    let phase: TabStatus.Phase
+    let color: Color
+    let icon: String
+
+    @State private var spinning = false
+
+    private static let image: NSImage? = Bundle.main.url(forResource: "HotSyncLogo", withExtension: "png")
+        .flatMap { NSImage(contentsOf: $0) }
+
+    private var isSyncing: Bool {
+        switch phase {
+        case .restoring, .syncing, .backingUp, .readingCalendar, .dumpingROM: return true
+        default: return false
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            if let image = Self.image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 36, height: 36)
+                    .opacity(isSyncing ? 1 : 0.55)
+                    .rotationEffect(.degrees(spinning ? 360 : 0))
+                    .animation(spinning ? .linear(duration: 1.6).repeatForever(autoreverses: false) : .default,
+                               value: spinning)
+            } else {
+                Circle()
+                    .fill(color.opacity(0.2))
+                    .frame(width: 36, height: 36)
+            }
+            if !isSyncing {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(3)
+                    .background(Circle().fill(color))
+                    .offset(x: 4, y: 4)
+            }
+        }
+        .frame(width: 40, height: 40)
+        .onAppear { spinning = isSyncing }
+        .onChange(of: isSyncing) { _, now in spinning = now }
     }
 }

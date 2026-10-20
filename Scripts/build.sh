@@ -54,6 +54,9 @@ cp "$PROJECT_DIR/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 # PkgInfo
 echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 
+# Das HotSync-Logo (die beiden Pfeile): dreht sich im Tab, solange ein HotSync läuft
+cp "$PROJECT_DIR/Resources/HotSyncLogo.png" "$APP_BUNDLE/Contents/Resources/HotSyncLogo.png"
+
 # 3. App-Icon
 echo "[3/6] Kopiere App-Icon..."
 ICON_FILE="$PROJECT_DIR/Resources/AppIcon.icns"
