@@ -136,8 +136,9 @@ public enum TimeZoneFixups {
             // in the start rule and always 0 in the end rule, and a device
             // shown other values computes wild offsets. Keep what the record
             // had; a record that had no rules gets the device's usual values.
-            start.unknown = location.timezone.observesDST ? location.timezone.dstStart.unknown : 2
-            end.unknown = location.timezone.observesDST ? location.timezone.dstEnd.unknown : 0
+            let had = location.timezone.dstStart.unknown
+            start.unknown = location.timezone.observesDST && (1...2).contains(had) ? had : 2
+            end.unknown = 0
             fixed.timezone.dstStart = start
             fixed.timezone.dstEnd = end
         } else {
