@@ -15,6 +15,13 @@ APP_BUNDLE="$PROJECT_DIR/$APP_NAME.app"
 PILOT_PREFIX="$BUILD_DIR/pilot-link/install"
 SESSION_TOOL="$BUILD_DIR/release/hotsync-session"
 
+# Architekturen: universell (Apple Silicon und Intel). ARCHS="arm64" baut schneller
+# für den eigenen Mac; die Bibliotheken werden mit denselben Architekturen gebaut.
+ARCHS="${ARCHS:-arm64 x86_64}"
+ARCH_FLAGS="$(printf -- '-arch %s ' $ARCHS)"
+SWIFT_ARCHS="$(printf -- '--arch %s ' $ARCHS)"
+export ARCHS
+
 # Signatur: CODESIGN_IDENTITY, sonst .signing-identity (von make-signing-identity.sh),
 # sonst ad hoc ("-"). Ad hoc heißt: jeder Build ist für macOS eine neue App, und die
 # Freigaben für Kalender und Kontakte sind nach jedem Build weg.
@@ -30,9 +37,12 @@ echo ""
 # 1. Swift Build
 echo "[1/6] Kompiliere..."
 cd "$PROJECT_DIR"
-swift build -c release 2>&1
+# shellcheck disable=SC2086
+swift build -c release $SWIFT_ARCHS 2>&1
 
-EXECUTABLE="$BUILD_DIR/release/$APP_NAME"
+# wo SwiftPM das Produkt ablegt, hängt von den Architekturen ab: nachfragen
+# shellcheck disable=SC2086
+EXECUTABLE="$(swift build -c release $SWIFT_ARCHS --show-bin-path)/$APP_NAME"
 if [ ! -f "$EXECUTABLE" ]; then
     echo "FEHLER: Executable nicht gefunden unter $EXECUTABLE"
     exit 1
@@ -78,7 +88,8 @@ fi
 # App auch auf einem Mac ohne Homebrew bzw. ohne pilot-link in ~/.local.
 echo "[4/6] Baue hotsync-session und bette es ein..."
 "$SCRIPT_DIR/build-pilot-link.sh"
-clang -std=c99 -Wall -Wextra -Werror -O2 \
+# shellcheck disable=SC2086
+clang -std=c99 -Wall -Wextra -Werror -O2 $ARCH_FLAGS \
     -I"$PILOT_PREFIX/include" -L"$PILOT_PREFIX/lib" -lpisock \
     -o "$SESSION_TOOL" "$PROJECT_DIR/Tools/hotsync-session/hotsync-session.c"
 echo "      hotsync-session gebaut"
@@ -89,7 +100,9 @@ mkdir -p "$FRAMEWORKS"
 non_system_deps() {
     local own_id
     own_id=$(otool -D "$1" 2>/dev/null | tail -n +2)
-    otool -L "$1" | tail -n +2 | awk '{print $1}' \
+    # nur die eingerückten Zeilen sind Abhängigkeiten; ein universelles Binary
+    # hat je Architektur eine Kopfzeile mehr
+    otool -L "$1" | grep "$(printf '\t')" | awk '{print $1}' \
         | grep -v -E '^(/usr/lib/|/System/|@)' \
         | grep -v -x -F "${own_id:-__none__}" || true
 }
@@ -152,7 +165,7 @@ fi
 LEAKS=""
 for BIN in "$FRAMEWORKS"/*.dylib "$APP_BUNDLE/Contents/Resources/hotsync-session"; do
     [ -f "$BIN" ] || continue
-    BAD=$(otool -L "$BIN" | tail -n +2 | awk '{print $1}' | grep -v -E '^(/usr/lib/|/System/|@rpath/)' || true)
+    BAD=$(otool -L "$BIN" | grep "$(printf '\t')" | awk '{print $1}' | grep -v -E '^(/usr/lib/|/System/|@rpath/)' || true)
     [ -n "$BAD" ] && LEAKS="$LEAKS\n  $(basename "$BIN"): $BAD"
 done
 if [ -n "$LEAKS" ]; then
@@ -171,6 +184,15 @@ echo "      Signiert"
 # 6. Verifikation
 echo "[6/6] Verifiziere..."
 codesign -v "$APP_BUNDLE" 2>&1 && echo "      Code-Signatur OK" || echo "      WARNUNG: Signatur-Check fehlgeschlagen"
+# jedes Binary muss alle gewünschten Architekturen haben
+for BIN in "$APP_BUNDLE/Contents/MacOS/$APP_NAME" "$TOOL" "$FRAMEWORKS"/*.dylib; do
+    [ -f "$BIN" ] || continue
+    HAVE="$(lipo -archs "$BIN")"
+    for ARCH in $ARCHS; do
+        case " $HAVE " in *" $ARCH "*) ;; *) echo "      FEHLER: $(basename "$BIN") ohne $ARCH (hat: $HAVE)"; exit 1 ;; esac
+    done
+done
+echo "      Architekturen: $ARCHS"
 
 echo ""
 echo "=== Build erfolgreich ==="
