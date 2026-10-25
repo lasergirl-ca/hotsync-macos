@@ -541,6 +541,9 @@ enum L10n {
         "Gilt für alle Abgleiche dieses Palms: Kalender, Kontakte, Aufgaben, Uhr und Zeitzonen schreiben auf keiner Seite etwas und tragen ins Log ein, was sie tun würden. Die Sicherung läuft; in die Warteschlange gelegte Dateien werden trotzdem installiert.",
         "Applies to every sync of this Palm: Calendar, Contacts, Tasks, clock and time zones write nothing on either side and log what they would do. The backup still runs; files dropped into the queue are still installed."
     ) }
+    static var logWakeRestart: String { s(
+        "Aufgewacht: Listener werden neu gestartet", "Woke up: restarting the listeners"
+    ) }
     static var logDryRun: String { s("Probelauf: die Abgleiche schreiben nichts", "Dry run: the syncs write nothing") }
     static var logDryRunClock: String { s("Probelauf: die Uhr des Palms würde gestellt", "Dry run: the Palm's clock would be set") }
     static func logDryRunWouldInstall(_ name: String, _ records: Int, _ bytes: Int) -> String { s(

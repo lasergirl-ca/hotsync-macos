@@ -59,6 +59,10 @@ final class AppState {
     /// Startet das Werkzeug an einem Anschluss gar nicht erst (z. B. serieller
     /// Port belegt), nicht im Sekundentakt neu versuchen.
     private static let errorRetryDelay: TimeInterval = 10
+    /// Ein Listener ohne Palm bekommt nach dieser Zeit ein frisches Werkzeug:
+    /// ein lange laufender Prozess sieht nach Ruhezustand oder USB-Umbau
+    /// den Palm sonst nicht mehr (libusb hält eine Geräteliste im Cache).
+    static let listenerRefresh = 600
 
     @ObservationIgnored private var watchers: [UUID: FileWatcher] = [:]
     @ObservationIgnored private var sessions: [String: Session] = [:]
@@ -86,6 +90,26 @@ final class AppState {
         portMonitor.onChange = { [weak self] in self?.scheduleAll() }
         portMonitor.start()
         scheduleAll()
+
+        // Ruhezustand: Listener ohne Palm davor beenden, danach frisch starten.
+        // Ein Werkzeug, das den Ruhezustand überlebt, sieht den Palm nicht mehr.
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.stopIdleListeners() }
+            }
+        }
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                // beenden genügt: nach dem Ende wird der Anschluss neu vergeben,
+                // und ein Listener, der schon weg ist, kommt über scheduleAll
+                Task { @MainActor in
+                    guard let self else { return }
+                    DebugLog.shared.log(L10n.logWakeRestart, source: "Session")
+                    self.restartIdleListeners()
+                }
+            }
+        }
     }
 
     /// Beim Beenden: kein hotsync-session darf weiterlaufen.
@@ -516,13 +540,18 @@ final class AppState {
     /// Listener ohne Palm neu starten, damit geänderte Tabs (Anschluss,
     /// Baudrate, automatisch lauschen) gelten.
     private func restartIdleListeners() {
+        stopIdleListeners()
+        scheduleAll()
+    }
+
+    /// Listener ohne Palm beenden; der Anschluss wird nach ihrem Ende neu vergeben.
+    private func stopIdleListeners() {
         for session in sessions.values {
             if case .listener = session.purpose, !session.connected {
                 session.stopRequested = true
                 session.runner.kill()
             }
         }
-        scheduleAll()
     }
 
     private func scheduleAll() {
@@ -651,8 +680,12 @@ final class AppState {
     private func launch(_ purpose: Session.Purpose, on port: String, baudRate: Int) {
         let chainStep: Bool
         if case .tab(_, let chain) = purpose { chainStep = chain } else { chainStep = false }
-        let runner = SessionRunner(port: port, baudRate: baudRate,
-                                   timeout: chainStep ? Self.chainStepTimeout : 0)
+        let timeout: Int
+        switch purpose {
+        case .listener: timeout = Self.listenerRefresh    // läuft danach frisch weiter
+        case .tab: timeout = chainStep ? Self.chainStepTimeout : 0
+        }
+        let runner = SessionRunner(port: port, baudRate: baudRate, timeout: timeout)
         nextToken += 1
         let session = Session(runner: runner, purpose: purpose, token: nextToken)
         if case .tab(let id, _) = purpose {
@@ -1806,7 +1839,7 @@ final class AppState {
         } else if session.stopRequested {
             result = .stopped(date: now)
         } else if session.timedOut {
-            result = .timedOut(date: now)
+            if case .listener = session.purpose { result = nil } else { result = .timedOut(date: now) }
         } else if let message = session.errorMessage {
             result = .failed(date: now, message: message)
         } else {
