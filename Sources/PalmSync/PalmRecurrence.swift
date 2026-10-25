@@ -2,7 +2,7 @@ import Foundation
 
 /// Calendar arithmetic on PalmDates, proleptic Gregorian, no time zone.
 extension PalmDate {
-    static let gregorian: Calendar = {
+    public static let gregorian: Calendar = {
         var c = Calendar(identifier: .gregorian)
         c.timeZone = TimeZone(identifier: "UTC")!
         return c
@@ -12,7 +12,7 @@ extension PalmDate {
         Self.gregorian.date(from: DateComponents(year: year, month: month, day: day))!
     }
 
-    init(_ date: Date, in calendar: Calendar = PalmDate.gregorian) {
+    public init(_ date: Date, in calendar: Calendar = PalmDate.gregorian) {
         let c = calendar.dateComponents([.year, .month, .day], from: date)
         self.init(year: c.year!, month: c.month!, day: c.day!)
     }

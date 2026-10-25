@@ -603,10 +603,11 @@ final class AppState {
         /// danach: die Ortsdatenbanken mit der tzdata des Macs abgleichen
         var fixDatabases: [String] = []
         var fixing: String?
-        var fixPending = 0
         var fixChanged = 0
         var fixTotal = 0
         var fixUnknown = 0
+        /// die korrigierte Datenbank, die nach dem Schließen installiert wird
+        var fixInstall: URL?
         var restoreFiles: [URL] = []
         var restoreDone = 0
         var restoreFailed = 0
@@ -827,22 +828,25 @@ final class AppState {
             session.calendarRecords.append(PalmRecordIn(id: id, attributes: attrs, category: category, data: data))
         case .recordsDone where session.stage == .fixingLocations:
             locationsRead(session)
-        case .recordWritten where session.stage == .fixingLocations:
-            session.fixChanged += 1
-            session.fixPending -= 1
-            if session.fixPending == 0 { locationsDone(session) }
         case .dbClosed where session.stage == .fixingLocations:
-            fixLocations(session)    // die nächste Datenbank, oder weiter
-        case .error(let stage, let message) where session.stage == .fixingLocations
-            && ["opendb", "readall", "writerec", "closedb"].contains(stage):
-            if let tabId = session.tabId { tabLog(tabId, L10n.logLocationsFailed(session.fixing ?? "", stage, message)) }
-            switch stage {
-            case "opendb", "closedb": fixLocations(session)
-            case "writerec":
-                session.fixPending -= 1
-                if session.fixPending == 0 { locationsDone(session) }
-            default: session.runner.send("closedb")
+            if let url = session.fixInstall {
+                session.fixInstall = nil
+                session.runner.send("install \(url.path)")   // die korrigierte Datenbank, ganz
+            } else {
+                fixLocations(session)    // die nächste Datenbank, oder weiter
             }
+        case .installing where session.stage == .fixingLocations:
+            break
+        case .installed(let file, _) where session.stage == .fixingLocations:
+            if let tabId = session.tabId { tabLog(tabId, L10n.logLocationsInstalled(file)) }
+            fixLocations(session)
+        case .failed(let file, let failure) where session.stage == .fixingLocations:
+            if let tabId = session.tabId { tabLog(tabId, L10n.logLocationsFailed(file, "install", L10n.failureText(failure))) }
+            fixLocations(session)
+        case .error(let stage, let message) where session.stage == .fixingLocations
+            && ["opendb", "readall", "closedb"].contains(stage):
+            if let tabId = session.tabId { tabLog(tabId, L10n.logLocationsFailed(session.fixing ?? "", stage, message)) }
+            if stage == "readall" { session.runner.send("closedb") } else { fixLocations(session) }
 
         case .error(let stage, let message):
             session.errorMessage = "\(stage): \(message)"
@@ -1213,35 +1217,55 @@ final class AppState {
         let name = session.fixDatabases.removeFirst()
         session.fixing = name
         session.calendarRecords = []
-        session.fixPending = 0
         session.fixChanged = 0
         session.fixUnknown = 0
+        session.fixInstall = nil
         session.stage = .fixingLocations
         statuses[tabId]?.phase = .readingCalendar(user: user, database: name, done: 0)
         tabLog(tabId, L10n.logLocationsChecking(name))
-        session.runner.send("opendb rw \(name)")
+        session.runner.send("opendb r \(name)")
     }
 
-    /// Die Orte sind gelesen: was von der tzdata abweicht, geht korrigiert
-    /// zurück auf den Palm (gleiche ID, gleiche Kategorie).
+    /// Die Orte sind gelesen: weicht einer von der tzdata ab, geht die ganze
+    /// Datenbank korrigiert zurück - installiert, in derselben Reihenfolge.
+    /// Einzelne Datensätze zu schreiben bringt die Reihenfolge durcheinander,
+    /// und der Palm spricht seine Orte über die Position an.
     private func locationsRead(_ session: Session) {
-        guard let tabId = session.tabId else { return }
+        guard let tabId = session.tabId, let name = session.fixing, let profileId = session.profileId,
+              let profile = deviceManager.profile(profileId) else { return }
         session.fixTotal = session.calendarRecords.count
-        for record in session.calendarRecords where !record.isDeleted && !record.data.isEmpty {
-            guard let location = try? PalmLocation(data: record.data) else { continue }
-            guard TimeZoneFixups.zone(for: location) != nil else { session.fixUnknown += 1; continue }
-            guard let (fixed, change) = TimeZoneFixups.fix(location) else { continue }
-            tabLog(tabId, L10n.logLocationFixed(change))
-            session.fixPending += 1
-            session.runner.send("writerec \(record.id) \(record.attributes & 0x18) \(record.category) \(fixed.encode().base64EncodedString())")
+        var records: [PalmDatabase.Record] = []
+        for record in session.calendarRecords where !record.isDeleted {
+            var data = record.data
+            if let location = try? PalmLocation(data: record.data) {
+                if TimeZoneFixups.zone(for: location) == nil {
+                    session.fixUnknown += 1
+                } else if let (fixed, change) = TimeZoneFixups.fix(location) {
+                    tabLog(tabId, L10n.logLocationFixed(change))
+                    session.fixChanged += 1
+                    data = fixed.encode()
+                }
+            }
+            records.append(PalmDatabase.Record(attributes: 0, category: record.category, uniqueID: record.id, data: data))
         }
-        if session.fixPending == 0 { locationsDone(session) }
-    }
+        tabLog(tabId, L10n.logLocationsDone(name, session.fixChanged, session.fixTotal, session.fixUnknown))
 
-    private func locationsDone(_ session: Session) {
-        if let tabId = session.tabId, let name = session.fixing {
-            tabLog(tabId, L10n.logLocationsDone(name, session.fixChanged, session.fixTotal, session.fixUnknown))
-            if session.fixChanged > 0 && name == "locLDefLocationDB" { tabLog(tabId, L10n.logLocationsHint) }
+        if session.fixChanged > 0 {
+            // wie die des Palms: Version 2, Backup-Flag, Typ DATA (eingebaute) / DATC (eigene)
+            var db = PalmDatabase(name: name, type: name == "locLCusLocationDB" ? "DATC" : "DATA", creator: "locL",
+                                  attributes: 0x0008, version: 2)
+            db.records = records
+            db.uniqueIDSeed = (records.map(\.uniqueID).max() ?? 0) + 1
+            let url = deviceManager.profileDirectory(for: profile).appendingPathComponent("Sync")
+                .appendingPathComponent("\(name).pdb")
+            do {
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try db.encode().write(to: url, options: .atomic)
+                session.fixInstall = url
+                if name == "locLDefLocationDB" { tabLog(tabId, L10n.logLocationsHint) }
+            } catch {
+                tabLog(tabId, L10n.logLocationsFailed(name, "write", error.localizedDescription))
+            }
         }
         session.runner.send("closedb")
     }

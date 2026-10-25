@@ -71,9 +71,13 @@ private func task(_ title: String) throws -> PalmTask {
     #expect(business.category == 1)
 }
 
-@Test func alarmTasksAreRefusedUntilKnown() {
-    #expect(throws: PalmFormatError.invalidValue(field: "task.alarm", value: 0xA8)) {
-        try PalmTask(data: Data([0xA8, 0, 0, 0, 0, 1, 0xf5, 0x5a, 0, 0, 0x41, 0, 0]))
+@Test func alarmTask() throws {
+    let alarm = try task("Alarm")
+    #expect(alarm.dueDate == PalmDate(year: 2026, month: 10, day: 30))
+    #expect(alarm.alarm == .init(time: PalmTime(hour: 5, minute: 20), daysEarlier: 7))
+    #expect(alarm.encode()[0] == 0xA8)
+    #expect(throws: PalmFormatError.self) {
+        try PalmTask(data: Data([0xA8, 0, 0, 0, 0, 1, 0xf5, 0x5a, 25, 0, 0, 0, 0x41, 0, 0]))   // hour 25
     }
 }
 

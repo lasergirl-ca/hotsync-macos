@@ -86,3 +86,14 @@ private let now = ISO8601DateFormatter().date(from: "2026-10-24T12:00:00Z")!
     #expect(sydney.offsetMinutes == 600 && sydney.observesDST)
     #expect(sydney.dstStart?.month == 10 && sydney.dstStart?.week == 0 && sydney.dstEnd?.month == 4 && sydney.dstEnd?.week == 0)
 }
+
+@Test func zoneTableNamesAndPalmOrder() throws {
+    let url = try #require(Bundle.module.url(forResource: "locLTimeZoneDB", withExtension: "pdb", subdirectory: "Fixtures/device"))
+    let table = PalmZoneTable(records: try PalmDatabase(data: try Data(contentsOf: url)).records.map(\.data))
+    #expect(table.zones.count == 102)
+    #expect(table.name(country: 4, offsetMinutes: -480) == "Canada (Pacific)")
+    #expect(table.name(country: 4, offsetMinutes: -420) == "Canada (Mountain)")
+    #expect(table.name(country: 23, offsetMinutes: -300) == "USA (Eastern)")
+    #expect(table.name(country: 175, offsetMinutes: 300) == "Pakistan")
+
+}

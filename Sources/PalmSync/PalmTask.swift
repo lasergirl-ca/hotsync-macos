@@ -7,7 +7,7 @@ import Foundation
 ///
 /// Layout (big-endian):
 ///
-///      0  flags            0x80 due date, 0x40 completed, 0x20 alarm (?),
+///      0  flags            0x80 due date, 0x40 completed, 0x20 alarm,
 ///                          0x10 repeat, 0x08 always set, 0x04 note not empty
 ///      1  unknown[2]       0 so far
 ///      3  completed        1 when completed
@@ -15,18 +15,31 @@ import Foundation
 ///      5  priority         1-5
 ///      6  dueDate          PalmDate                          if 0x80
 ///         completedDate    PalmDate                          if 0x40
+///         alarm            hour[1] minute[1] daysEarlier[2]  if 0x20
 ///         repeatStart      PalmDate                          if 0x10
 ///         repeat           type[1] pad[1] endDate[2] frequency[1] on[1]
 ///                          weekStart[1] pad[1] — as the Calendar's
 ///         description      NUL-terminated
 ///         note             NUL-terminated, present even when empty
 ///
-/// A record with the alarm flag is refused until one has been seen: its
-/// fields are unknown and guessing would corrupt it.
+/// The order of the optional fields follows the flag bits from high to low;
+/// due + completed, due + alarm and due + repeat have been seen on a device,
+/// the other combinations follow the same rule.
 public struct PalmTask: Equatable, Sendable {
+    public struct Alarm: Equatable, Sendable {
+        public var time: PalmTime
+        /// Days before the due date; 0 = on the day.
+        public var daysEarlier: UInt16
+        public init(time: PalmTime, daysEarlier: UInt16 = 0) {
+            self.time = time
+            self.daysEarlier = daysEarlier
+        }
+    }
+
     public var dueDate: PalmDate?
     /// nil: not completed
     public var completedDate: PalmDate?
+    public var alarm: Alarm?
     public var priority: UInt8
     public var repeatRule: (start: PalmDate, rule: CalendarEvent.Repeat)?
     public var title: String
@@ -45,12 +58,14 @@ public struct PalmTask: Equatable, Sendable {
     static let knownFlags: UInt8 = 0xFC
 
     public init(title: String, note: String = "", priority: UInt8 = 1, dueDate: PalmDate? = nil,
-                completedDate: PalmDate? = nil, repeatRule: (start: PalmDate, rule: CalendarEvent.Repeat)? = nil) {
+                completedDate: PalmDate? = nil, alarm: Alarm? = nil,
+                repeatRule: (start: PalmDate, rule: CalendarEvent.Repeat)? = nil) {
         self.title = title
         self.note = note
         self.priority = priority
         self.dueDate = dueDate
         self.completedDate = completedDate
+        self.alarm = alarm
         self.repeatRule = repeatRule
         unknown = (0, 0, 0)
         otherFlags = 0
@@ -73,9 +88,6 @@ public struct PalmTask: Equatable, Sendable {
         unknown = (u1, u2, u4)
         otherFlags = flags & ~Self.knownFlags
 
-        guard flags & Self.alarmFlag == 0 else {
-            throw PalmFormatError.invalidValue(field: "task.alarm", value: Int(flags))
-        }
         dueDate = flags & Self.dueFlag != 0 ? PalmDate(packed: try r.u16()) : nil
         if flags & Self.completedFlag != 0 {
             completedDate = PalmDate(packed: try r.u16())
@@ -84,6 +96,15 @@ public struct PalmTask: Equatable, Sendable {
         }
         guard (completed != 0) == (completedDate != nil) else {
             throw PalmFormatError.invalidValue(field: "task.completed", value: Int(completed))
+        }
+        if flags & Self.alarmFlag != 0 {
+            let hour = try r.u8()
+            let minute = try r.u8()
+            let days = try r.u16()
+            guard hour < 24, minute < 60 else { throw PalmFormatError.invalidValue(field: "task.alarm", value: Int(hour) * 100 + Int(minute)) }
+            alarm = Alarm(time: PalmTime(hour: Int(hour), minute: Int(minute)), daysEarlier: days)
+        } else {
+            alarm = nil
         }
         if flags & Self.repeatFlag != 0 {
             let start = PalmDate(packed: try r.u16())
@@ -112,6 +133,7 @@ public struct PalmTask: Equatable, Sendable {
         var flags = Self.descriptionFlag | otherFlags
         if dueDate != nil { flags |= Self.dueFlag }
         if completedDate != nil { flags |= Self.completedFlag }
+        if alarm != nil { flags |= Self.alarmFlag }
         if repeatRule != nil { flags |= Self.repeatFlag }
         if !note.isEmpty { flags |= Self.noteFlag }
         w.u8(flags)
@@ -122,6 +144,11 @@ public struct PalmTask: Equatable, Sendable {
         w.u8(priority)
         if let dueDate { w.u16(dueDate.packed) }
         if let completedDate { w.u16(completedDate.packed) }
+        if let alarm {
+            w.u8(UInt8(clamping: alarm.time.hour))
+            w.u8(UInt8(clamping: alarm.time.minute))
+            w.u16(alarm.daysEarlier)
+        }
         if let (start, rule) = repeatRule {
             w.u16(start.packed)
             w.u8(rule.type.rawValue)

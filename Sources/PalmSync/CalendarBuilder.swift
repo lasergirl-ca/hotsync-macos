@@ -312,18 +312,24 @@ public struct CalendarBuilder {
     /// counted ends, set positions, month lists, several weekdays with a
     /// week number, and the like.
     func palmRule(_ rule: MacRecurrence, start: Date) -> CalendarEvent.Repeat? {
-        guard (1...255).contains(rule.interval), rule.setPositions.isEmpty, rule.monthsOfTheYear.isEmpty else {
-            return nil
-        }
         var endDate: PalmDate?
         switch rule.end {
         case nil: endDate = nil
         case .date(let date): endDate = PalmDate(date, in: calendar)
         case .count: return nil
         }
-        let startDate = PalmDate(start, in: calendar)
+        return Self.palmRule(rule, startDate: PalmDate(start, in: calendar), endDate: endDate, defaultWeekStart: options.startOfWeek)
+    }
+
+    /// The same, for a rule whose dates are already Palm dates (Tasks).
+    public static func palmRule(_ rule: MacRecurrence, startDate: PalmDate, endDate: PalmDate?,
+                                defaultWeekStart: UInt8) -> CalendarEvent.Repeat? {
+        guard (1...255).contains(rule.interval), rule.setPositions.isEmpty, rule.monthsOfTheYear.isEmpty else {
+            return nil
+        }
+        if case .count = rule.end { return nil }
         let frequency = UInt8(rule.interval)
-        let weekStart: UInt8 = rule.firstDayOfTheWeek == 2 ? 1 : (rule.firstDayOfTheWeek == 1 ? 0 : options.startOfWeek)
+        let weekStart: UInt8 = rule.firstDayOfTheWeek == 2 ? 1 : (rule.firstDayOfTheWeek == 1 ? 0 : defaultWeekStart)
 
         switch rule.frequency {
         case .daily:
