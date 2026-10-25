@@ -737,7 +737,7 @@ struct SyncLogo: View {
     }
 }
 
-/// Uhr und Zeitzonen: ein Schalter je Profil.
+/// Uhr und Zeitzonen: zwei Schalter je Profil.
 struct TimeSyncSection: View {
     @Environment(AppState.self) var appState
     let profileId: UUID
@@ -746,12 +746,21 @@ struct TimeSyncSection: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 6) {
                 Toggle(isOn: Binding(
-                    get: { appState.deviceManager.profile(profileId)?.isTimeSyncOn ?? true },
-                    set: { appState.setTimeSync($0, for: profileId) }
+                    get: { appState.deviceManager.profile(profileId)?.isClockSyncOn ?? true },
+                    set: { appState.setClockSync($0, for: profileId) }
                 )) {
-                    Text(L10n.timeSyncToggle)
+                    Text(L10n.clockSyncToggle)
                 }
-                Text(L10n.timeSyncHint)
+                Text(L10n.clockSyncHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle(isOn: Binding(
+                    get: { appState.deviceManager.profile(profileId)?.isZoneSyncOn ?? true },
+                    set: { appState.setZoneSync($0, for: profileId) }
+                )) {
+                    Text(L10n.zoneSyncToggle)
+                }
+                Text(L10n.zoneSyncHint)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

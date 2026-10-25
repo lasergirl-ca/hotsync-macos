@@ -866,9 +866,15 @@ final class AppState {
         refreshCalendarPreview(for: profileId)
     }
 
-    func setTimeSync(_ on: Bool, for profileId: UUID) {
+    func setClockSync(_ on: Bool, for profileId: UUID) {
         guard var profile = deviceManager.profile(profileId) else { return }
-        profile.timeSync = on
+        profile.clockSync = on
+        deviceManager.updateProfile(profile)
+    }
+
+    func setZoneSync(_ on: Bool, for profileId: UUID) {
+        guard var profile = deviceManager.profile(profileId) else { return }
+        profile.zoneSync = on
         deviceManager.updateProfile(profile)
     }
 
@@ -1005,10 +1011,10 @@ final class AppState {
         selectedTabId = tabId
 
         let mode = tabStore.tab(tabId)?.hotSyncMode ?? .syncInstallBackup
-        if mode.syncs, deviceManager.profile(profileId)?.isTimeSyncOn == true {
-            // Uhr vom Mac, Zeitzonen nach der Sicherung
-            session.runner.send("settime")
-            session.fixDatabases = ["locLDefLocationDB", "locLCusLocationDB"]
+        if mode.syncs, let profile = deviceManager.profile(profileId) {
+            // Uhr vom Mac jetzt, Zeitzonen nach der Sicherung
+            if profile.isClockSyncOn { session.runner.send("settime") }
+            if profile.isZoneSyncOn { session.fixDatabases = ["locLDefLocationDB", "locLCusLocationDB"] }
         }
         if mode.syncs, let profile = deviceManager.profile(profileId) {
             // Erst sichern, dann ersetzen: ohne Sicherung dieses Palms gehen

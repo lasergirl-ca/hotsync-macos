@@ -534,10 +534,14 @@ enum L10n {
         "\(name) on the Palm: \(records) records, \(identical) decode, \(different) differ, \(deleted) deleted; categories: \(categories.joined(separator: ", "))"
     ) }
     static var timeSyncTitle: String { s("Uhr und Zeitzonen", "Clock and time zones") }
-    static var timeSyncToggle: String { s("Uhr und Zeitzonen des Palms nachführen", "Keep the Palm's clock and time zones current") }
-    static var timeSyncHint: String { s(
-        "Bei jedem HotSync wird die Uhr des Palms auf die des Macs gestellt, und seine Orte (Prefs › Datum & Uhrzeit) bekommen die Zeitzonen-Regeln aus der tzdata des Macs – ein Palm OS 5 kennt weder die Regeln von 2007 noch eine Provinz, die die Uhr nicht mehr umstellt. Nach einer Änderung einmal den Heimatort in Prefs antippen, damit die Uhr die neue Regel übernimmt.",
-        "At each HotSync the Palm's clock is set from the Mac's, and its locations (Prefs › Date & Time) get the time zone rules from the Mac's tzdata – a Palm OS 5 knows neither the 2007 rules nor a province that stopped changing clocks. After a change, tap the home location in Prefs once so the clock takes the new rule."
+    static var clockSyncToggle: String { s("Uhr des Palms vom Mac stellen", "Set the Palm's clock from the Mac") }
+    static var clockSyncHint: String { s(
+        "Bei jedem HotSync, wie beim HotSync-Manager.", "At each HotSync, as the HotSync Manager did."
+    ) }
+    static var zoneSyncToggle: String { s("Zeitzonen des Palms aus der tzdata des Macs nachführen", "Update the Palm's time zones from the Mac's tzdata") }
+    static var zoneSyncHint: String { s(
+        "Die Orte des Palms (Prefs › Datum & Uhrzeit) bekommen bei jedem HotSync die Zeitzonen-Regeln aus der tzdata des Macs – ein Palm OS 5 kennt weder die Regeln von 2007 noch eine Provinz, die die Uhr nicht mehr umstellt. Nach einer Änderung einmal den Heimatort in Prefs antippen, damit die Uhr die neue Regel übernimmt.",
+        "The Palm's locations (Prefs › Date & Time) get the time zone rules from the Mac's tzdata at each HotSync – a Palm OS 5 knows neither the 2007 rules nor a province that stopped changing clocks. After a change, tap the home location in Prefs once so the clock takes the new rule."
     ) }
     static func logTimeSet(_ date: Date) -> String { s(
         "Uhr des Palms gestellt: \(date.formatted(date: .abbreviated, time: .shortened))",
