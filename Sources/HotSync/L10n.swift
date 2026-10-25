@@ -533,6 +533,42 @@ enum L10n {
         "\(name) auf dem Palm: \(records) Datensätze, \(identical) lesbar, \(different) abweichend, \(deleted) gelöscht; Kategorien: \(categories.joined(separator: ", "))",
         "\(name) on the Palm: \(records) records, \(identical) decode, \(different) differ, \(deleted) deleted; categories: \(categories.joined(separator: ", "))"
     ) }
+    static var twoWayDryRunToggle: String { s(
+        "Probelauf in beide Richtungen (nur Log)", "Two-way dry run (log only)"
+    ) }
+    static var twoWayDryRunHint: String { s(
+        "Solange an, wird der Kalender nicht mehr als Ganzes auf den Palm gespielt. Stattdessen liest der HotSync den Kalender des Palms, vergleicht ihn Feld für Feld mit dem Mac und schreibt ins Log, was ein Abgleich in beide Richtungen ändern würde – auf keiner Seite wird etwas geschrieben.",
+        "While on, the calendar is no longer put on the Palm whole. Instead the HotSync reads the Palm's calendar, compares it field by field with the Mac and logs what a two-way sync would change – nothing is written on either side."
+    ) }
+    static var logTwoWayDryRunPending: String { s(
+        "Kalender: Probelauf in beide Richtungen nach der Sicherung; der Kalender wird nicht installiert",
+        "Calendar: two-way dry run after the backup; the calendar is not installed"
+    ) }
+    static var logTwoWayReading: String { s("Probelauf: lese den Kalender des Palms …", "Dry run: reading the Palm's calendar …") }
+    static func logTwoWayMode(fast: Bool, lastSyncPC: UInt32, mirrorEntries: Int) -> String { s(
+        fast ? "Probelauf: schneller Abgleich möglich (Spiegel mit \(mirrorEntries) Einträgen, letzter PC passt)" : "Probelauf: langsamer Abgleich (Spiegel: \(mirrorEntries) Einträge, letzter PC \(lastSyncPC)); Datensätze werden nach Inhalt gepaart",
+        fast ? "Dry run: a fast sync would do (mirror with \(mirrorEntries) entries, last PC matches)" : "Dry run: slow sync (mirror: \(mirrorEntries) entries, last PC \(lastSyncPC)); records are paired by content"
+    ) }
+    static func logTwoWaySummary(toPalm: Int, palmDeletes: Int, toMac: Int, macDeletes: Int, conflicts: Int) -> String { s(
+        "Probelauf: \(toPalm) auf den Palm, \(palmDeletes) dort löschen; \(toMac) auf den Mac, \(macDeletes) dort löschen; \(conflicts) Konflikte (der Mac gewinnt)",
+        "Dry run: \(toPalm) to the Palm, \(palmDeletes) deleted there; \(toMac) to the Mac, \(macDeletes) deleted there; \(conflicts) conflicts (the Mac wins)"
+    ) }
+    static func logTwoWayToPalm(_ title: String, new: Bool) -> String { s(
+        new ? "→ Palm (neu): \(title)" : "→ Palm: \(title)", new ? "→ Palm (new): \(title)" : "→ Palm: \(title)"
+    ) }
+    static func logTwoWayToMac(_ title: String, new: Bool) -> String { s(
+        new ? "→ Mac (neu): \(title)" : "→ Mac: \(title)", new ? "→ Mac (new): \(title)" : "→ Mac: \(title)"
+    ) }
+    static func logTwoWayConflict(_ title: String, _ field: String, _ palm: String, _ mac: String) -> String { s(
+        "Konflikt \(title) · \(field): Palm „\(palm)“, Mac „\(mac)“ – Mac gewinnt",
+        "Conflict \(title) · \(field): Palm “\(palm)”, Mac “\(mac)” – Mac wins"
+    ) }
+    static func logTwoWayMissingCategories(_ names: [String]) -> String { s(
+        "Kategorien, die der Palm noch nicht hat: \(names.joined(separator: ", "))",
+        "Categories the Palm does not have yet: \(names.joined(separator: ", "))"
+    ) }
+    static var logTwoWayDryRunDone: String { s("Probelauf beendet, nichts geschrieben", "Dry run done, nothing written") }
+    static func logTwoWayFailed(_ reason: String) -> String { s("Probelauf abgebrochen: \(reason)", "Dry run stopped: \(reason)") }
     static var taskSyncTitle: String { s("Aufgaben: Mac → Palm", "Tasks: Mac → Palm") }
     static var taskSyncToggle: String { s("Aufgaben abgleichen", "Sync Tasks") }
     static var taskSyncChoose: String { s("Listen wählen", "Choose lists") }

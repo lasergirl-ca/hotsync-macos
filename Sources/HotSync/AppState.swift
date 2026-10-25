@@ -594,7 +594,7 @@ final class AppState {
         var rejection: TabStatus.Rejection?
         /// Ablauf einer angenommenen Sitzung: zurückspielen (falls angefragt),
         /// die Warteschlange installieren, sichern (falls eingeschaltet)
-        enum Stage { case restoring, installing, backingUp, readingCalendar, fixingLocations, dumpingROM }
+        enum Stage { case restoring, installing, backingUp, readingCalendar, twoWayCalendar, fixingLocations, dumpingROM }
         var stage: Stage = .installing
         /// nach der Sicherung: diese Datenbanken vom Palm lesen und prüfen
         var checkDatabases: [String] = []
@@ -611,6 +611,10 @@ final class AppState {
         var fixInstall: URL?
         /// die Zonennamen des Palms (locLTimeZoneDB), für die Reihenfolge
         var zoneTable = PalmZoneTable(zones: [])
+        /// Kalender in beide Richtungen (Probelauf): nach der Sicherung
+        var twoWayCalendar = false
+        /// aus dem syncInfo-Ereignis: welcher PC zuletzt abgeglichen hat
+        var lastSyncPC: UInt32 = 0
         var restoreFiles: [URL] = []
         var restoreDone = 0
         var restoreFailed = 0
@@ -703,6 +707,26 @@ final class AppState {
             if let profileId = session.profileId {
                 deviceManager.assignIdentity(user, to: profileId)
             }
+
+        // Kalender in beide Richtungen (Probelauf): lesen, planen, schließen
+        case .syncInfo(let pc, _):
+            session.lastSyncPC = pc
+        case .dbOpened where session.stage == .twoWayCalendar:
+            session.runner.send("readappinfo")
+        case .appInfo(let data) where session.stage == .twoWayCalendar:
+            session.calendarAppInfo = data
+            session.runner.send("readall")
+        case .record(let id, _, let attrs, let category, let data) where session.stage == .twoWayCalendar:
+            session.calendarRecords.append(PalmRecordIn(id: id, attributes: attrs, category: category, data: data))
+        case .recordsDone where session.stage == .twoWayCalendar:
+            twoWayPlanned(session)
+            session.runner.send("closedb")
+        case .dbClosed where session.stage == .twoWayCalendar:
+            fixLocations(session)
+        case .error(let stage, let message) where session.stage == .twoWayCalendar
+            && ["opendb", "readappinfo", "readall", "closedb"].contains(stage):
+            if let tabId = session.tabId { tabLog(tabId, L10n.logTwoWayFailed("\(stage): \(message)")) }
+            if stage == "readall" || stage == "readappinfo" { session.runner.send("closedb") } else { fixLocations(session) }
 
         // Zeitzonen: die korrigierte Ortsdatenbank wird installiert - vor den
         // allgemeinen Fällen, sonst zählt sie als Datei der Warteschlange
@@ -859,7 +883,7 @@ final class AppState {
             DebugLog.shared.log(L10n.logSessionError(portLabel(port), stage, message), source: "Session")
             if let tabId = session.tabId { tabLog(tabId, L10n.logSessionError(portLabel(port), stage, message)) }
 
-        case .syncInfo, .dbOpened, .dbClosed, .appInfo, .appInfoWritten, .record, .recordsDone,
+        case .dbOpened, .dbClosed, .appInfo, .appInfoWritten, .record, .recordsDone,
              .recordWritten, .recordDeleted, .flagsReset, .cleanedUp, .syncInfoWritten:
             // Datensatzzugriff außerhalb der Kalenderprüfung: gehört dem
             // Abgleich, den die App noch nicht fährt
@@ -893,6 +917,12 @@ final class AppState {
         profile.contactSync = settings
         deviceManager.updateProfile(profile)
         refreshContactPreview(for: profileId)
+    }
+
+    func setCalendarTwoWayDryRun(_ on: Bool, for profileId: UUID) {
+        guard var profile = deviceManager.profile(profileId) else { return }
+        profile.calendarTwoWayDryRun = on
+        deviceManager.updateProfile(profile)
     }
 
     func setTaskSync(_ settings: TaskSyncSettings, for profileId: UUID) {
@@ -1060,12 +1090,16 @@ final class AppState {
             // Erst sichern, dann ersetzen: ohne Sicherung dieses Palms gehen
             // sein eigener Kalender und seine Kontakte nicht verloren
             if let settings = profile.calendarSync, settings.enabled {
-                if profile.lastBackupAt == nil {
+                if profile.isCalendarTwoWayDryRun {
+                    // Probelauf: nichts installieren, nach der Sicherung planen
+                    session.twoWayCalendar = true
+                    tabLog(tabId, L10n.logTwoWayDryRunPending)
+                } else if profile.lastBackupAt == nil {
                     tabLog(tabId, L10n.logCalendarNeedsBackup)
                 } else {
                     queueCalendar(settings, profileId: profileId, tabId: tabId, queue: queue)
+                    session.checkDatabases.append(CalendarBuilder.databaseName)
                 }
-                session.checkDatabases.append(CalendarBuilder.databaseName)
             }
             if let settings = profile.contactSync, settings.enabled {
                 if profile.lastBackupAt == nil {
@@ -1214,7 +1248,7 @@ final class AppState {
     /// prüfen, eine nach der anderen, dann die Zeitzonen, dann das ROM.
     private func afterBackup(_ session: Session) {
         guard !session.checkDatabases.isEmpty, let tabId = session.tabId, let user = session.user else {
-            fixLocations(session)
+            twoWayCalendar(session)
             return
         }
         let name = session.checkDatabases.removeFirst()
@@ -1261,6 +1295,79 @@ final class AppState {
             categories = []
         }
         tabLog(tabId, L10n.logCalendarChecked(name, session.calendarRecords.count, identical, different, deleted, categories))
+    }
+
+    // MARK: Kalender in beide Richtungen (Probelauf)
+
+    /// Liest den Kalender des Palms, plant den Abgleich gegen den Spiegel
+    /// und schreibt den Plan ins Log - nichts wird geschrieben. Dann die
+    /// Zeitzonen.
+    private func twoWayCalendar(_ session: Session) {
+        guard session.twoWayCalendar, let tabId = session.tabId, let user = session.user else {
+            fixLocations(session)
+            return
+        }
+        session.twoWayCalendar = false
+        session.calendarAppInfo = nil
+        session.calendarRecords = []
+        session.stage = .twoWayCalendar
+        statuses[tabId]?.phase = .readingCalendar(user: user, database: CalendarBuilder.databaseName, done: 0)
+        tabLog(tabId, L10n.logTwoWayReading)
+        session.runner.send("opendb r \(CalendarBuilder.databaseName)")
+    }
+
+    private func mirrorURL(for profile: DeviceProfile) -> URL {
+        deviceManager.profileDirectory(for: profile).appendingPathComponent("Sync").appendingPathComponent("calendar-mirror.json")
+    }
+
+    /// Der Kalender ist gelesen: Mac-Seite holen, planen, berichten.
+    private func twoWayPlanned(_ session: Session) {
+        guard let tabId = session.tabId, let profileId = session.profileId,
+              let profile = deviceManager.profile(profileId), let settings = profile.calendarSync else { return }
+        let url = mirrorURL(for: profile)
+        let mirror = (try? SyncMirror.load(from: url)) ?? SyncMirror(pcID: SyncMirror.newPCID())
+        let fast = mirror.lastSync != nil && session.lastSyncPC == mirror.pcID
+        tabLog(tabId, L10n.logTwoWayMode(fast: fast, lastSyncPC: session.lastSyncPC, mirrorEntries: mirror.entries.count))
+
+        let categories = session.calendarAppInfo.flatMap { try? CalendarAppInfo(data: $0) }?.categories.names ?? ["Unfiled"]
+        let palm = PalmSnapshot.all(session.calendarRecords)   // der Probelauf liest immer alles
+
+        guard calendarSource.hasAccess else {
+            tabLog(tabId, L10n.logCalendarNoAccess)
+            return
+        }
+        let calendar = Foundation.Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let windowStart = calendar.date(byAdding: .day, value: -settings.daysBack, to: today)!
+        let windowEnd = calendar.date(byAdding: .day, value: settings.daysAhead, to: today)!
+        let events = calendarSource.events(from: windowStart, to: windowEnd, calendarIDs: settings.calendars.map(\.id))
+        let builder = CalendarBuilder(options: .init(homeZone: .current, windowStart: windowStart, windowEnd: windowEnd,
+                                                     calendars: settings.macCalendars,
+                                                     startOfWeek: calendar.firstWeekday == 2 ? 1 : 0))
+        let items = builder.items(events).items
+        let engine = CalendarSyncEngine(windowStart: PalmDate(windowStart, in: calendar), windowEnd: PalmDate(windowEnd, in: calendar))
+        do {
+            let plan = try engine.plan(palm: palm, palmCategories: categories, mac: items, mirror: mirror)
+            tabLog(tabId, L10n.logTwoWaySummary(toPalm: plan.palmWrites.count, palmDeletes: plan.palmDeletes.count,
+                                                toMac: plan.macCreates.count + plan.macUpdates.count, macDeletes: plan.macDeletes.count,
+                                                conflicts: plan.conflicts.count))
+            var lines: [String] = []
+            for w in plan.palmWrites.prefix(10) {
+                let title = (try? CalendarEvent(data: w.record))?.title ?? "?"
+                lines.append(L10n.logTwoWayToPalm(title, new: w.id == nil))
+            }
+            for c in plan.macCreates.prefix(10) { lines.append(L10n.logTwoWayToMac(c.event.title ?? "?", new: true)) }
+            for c in plan.macUpdates.prefix(10) { lines.append(L10n.logTwoWayToMac(c.event.title ?? "?", new: false)) }
+            for conflict in plan.conflicts.prefix(10) {
+                lines.append(L10n.logTwoWayConflict(conflict.title, conflict.field.rawValue, conflict.palmValue, conflict.macValue))
+            }
+            for line in lines { tabLog(tabId, "  " + line) }
+            for line in plan.log.prefix(10) { tabLog(tabId, "  " + line) }
+            if !plan.missingCategories.isEmpty { tabLog(tabId, L10n.logTwoWayMissingCategories(plan.missingCategories)) }
+            tabLog(tabId, L10n.logTwoWayDryRunDone)
+        } catch {
+            tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
+        }
     }
 
     /// Die Ortsdatenbanken des Palms (eingebaute und eigene Orte) mit der

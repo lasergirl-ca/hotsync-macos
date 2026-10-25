@@ -19,6 +19,12 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     var contactSync: ContactSyncSettings?
     /// Aufgaben-Abgleich Mac → Palm: welche Erinnerungslisten; nil = nie eingerichtet
     var taskSync: TaskSyncSettings?
+    /// Kalender in beide Richtungen, als Probelauf: der Palm wird gelesen,
+    /// der Abgleich geplant und ins Log geschrieben, nichts geschrieben.
+    /// Solange an, wird der Kalender nicht mehr als Ganzes installiert.
+    var calendarTwoWayDryRun: Bool?
+
+    var isCalendarTwoWayDryRun: Bool { calendarTwoWayDryRun ?? false }
     /// Die Uhr des Palms bei jedem HotSync vom Mac stellen; nil = an
     var clockSync: Bool?
     /// Die Zeitzonen-Regeln der Orte des Palms aus der tzdata des Macs
