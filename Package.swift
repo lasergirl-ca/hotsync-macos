@@ -78,6 +78,7 @@ let package = Package(
                 .linkedFramework("UserNotifications"),
                 .linkedFramework("EventKit"),
                 .linkedFramework("Contacts"),
+                .linkedFramework("CoreWLAN"),
             ]
         )
     ]

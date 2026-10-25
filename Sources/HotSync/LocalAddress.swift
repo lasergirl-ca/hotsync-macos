@@ -1,12 +1,19 @@
+import CoreWLAN
 import Foundation
 
 /// Die IPv4-Adressen dieses Macs, für den Netzwerk-HotSync: der Palm
 /// braucht die Adresse des "primären PCs". WLAN und Ethernet zuerst,
 /// Loopback und Link-Local nie.
 enum LocalAddress {
+    /// The name the Palm shows for this Mac: the computer name from Sharing.
+    static var computerName: String {
+        Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+    }
+
     struct Address: Equatable {
         let interface: String
         let ip: String
+        let netmask: String
     }
 
     static func ipv4() -> [Address] {
@@ -23,12 +30,22 @@ enum LocalAddress {
             guard getnameinfo(addr, socklen_t(addr.pointee.sa_len), &buffer, socklen_t(buffer.count), nil, 0, NI_NUMERICHOST) == 0 else { continue }
             let ip = String(cString: buffer)
             if ip.hasPrefix("169.254.") { continue }
-            list.append(Address(interface: String(cString: entry.pointee.ifa_name), ip: ip))
+            var netmask = "255.255.255.0"
+            if let mask = entry.pointee.ifa_netmask,
+               getnameinfo(mask, socklen_t(mask.pointee.sa_len), &buffer, socklen_t(buffer.count), nil, 0, NI_NUMERICHOST) == 0 {
+                netmask = String(cString: buffer)
+            }
+            list.append(Address(interface: String(cString: entry.pointee.ifa_name), ip: ip, netmask: netmask))
         }
-        // en0/en1 (WLAN, Ethernet) vor VPN- und Bridge-Schnittstellen
+        // WLAN zuerst (dort ist der Palm), dann Ethernet, dann VPN- und
+        // Bridge-Schnittstellen
+        let wifi = CWWiFiClient.shared().interface()?.interfaceName
+        func rank(_ a: Address) -> Int {
+            if a.interface == wifi { return 0 }
+            return a.interface.hasPrefix("en") ? 1 : 2
+        }
         return list.sorted { a, b in
-            let ra = a.interface.hasPrefix("en") ? 0 : 1
-            let rb = b.interface.hasPrefix("en") ? 0 : 1
+            let (ra, rb) = (rank(a), rank(b))
             return ra != rb ? ra < rb : a.interface < b.interface
         }
     }

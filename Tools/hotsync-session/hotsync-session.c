@@ -1138,6 +1138,41 @@ static void set_time(int sd)
 	emit_end();
 }
 
+/* "netsync ADRESSE MASKE NAME": diesen Mac als primären PC für den
+ * Netzwerk-HotSync in den Palm schreiben, wie es der HotSync-Manager bei
+ * jedem lokalen HotSync tat. Das LANSync-Flag bleibt, wie es war. */
+static void write_net_sync(int sd, const char *args)
+{
+	struct NetSyncInfo info;
+	char address[40], mask[40];
+	const char *p = args, *q;
+
+	memset(&info, 0, sizeof(info));
+	if (dlp_ReadNetSyncInfo(sd, &info) < 0)
+		memset(&info, 0, sizeof(info));
+
+	q = strchr(p, ' ');
+	if (!q) { emit_error("netsync", "usage: netsync ADDRESS MASK NAME"); return; }
+	snprintf(address, sizeof(address), "%.*s", (int)(q - p), p);
+	p = q + 1;
+	q = strchr(p, ' ');
+	if (!q) { emit_error("netsync", "usage: netsync ADDRESS MASK NAME"); return; }
+	snprintf(mask, sizeof(mask), "%.*s", (int)(q - p), p);
+	p = q + 1;
+
+	strncpy(info.hostAddress, address, sizeof(info.hostAddress) - 1);
+	strncpy(info.hostSubnetMask, mask, sizeof(info.hostSubnetMask) - 1);
+	utf8_to_cp1252(p, info.hostName, sizeof(info.hostName));
+	if (dlp_WriteNetSyncInfo(sd, &info) < 0) {
+		emit_dlp_error(sd, "netsync", "cannot write the network HotSync settings");
+		return;
+	}
+	emit_begin("netSyncSet");
+	emit_str("address", info.hostAddress, 0);
+	emit_str("name", info.hostName, 1);
+	emit_end();
+}
+
 /* Abstand der Lebenszeichen an den Palm, solange keine Anweisung kommt -
  * ohne sie bricht der Palm die Sitzung nach einer Weile ab. */
 #define TICKLE_INTERVAL_MS	5000
@@ -1212,6 +1247,8 @@ static void run_commands(int sd)
 			write_sync_info(sd, line + 9);
 		} else if (strcmp(line, "settime") == 0) {
 			set_time(sd);
+		} else if (strncmp(line, "netsync ", 8) == 0) {
+			write_net_sync(sd, line + 8);
 		} else if (strncmp(line, "log ", 4) == 0) {
 			char entry[1024];
 			utf8_to_cp1252(line + 4, entry, sizeof(entry));

@@ -665,7 +665,23 @@ enum L10n {
         "Aufgaben noch nicht auf den Palm gespielt: erst muss eine Sicherung dieses Palms da sein (dieser HotSync legt sie an)",
         "Tasks not put on the Palm yet: a backup of this Palm has to exist first (this HotSync makes it)"
     ) }
-    static var timeSyncTitle: String { s("Uhr und Zeitzonen", "Clock and time zones") }
+    static var timeSyncTitle: String { s("Uhr, Zeitzonen und Netzwerk", "Clock, time zones and network") }
+    static var netSyncToggle: String { s(
+        "Diesen Mac als primären PC für den Netzwerk-HotSync eintragen", "Set this Mac as the Palm's primary PC for network HotSync"
+    ) }
+    static func netSyncHint(_ ip: String?, _ name: String) -> String { s(
+        "Bei jedem Kabel-HotSync bekommt der Palm Adresse und Namen dieses Macs (\(ip ?? "–"), \(name)) in seine Netzwerk-HotSync-Einstellungen, wie beim HotSync-Manager. Danach steht unter HotSync › Menü › Primärer PC-Setup schon dieser Mac; für einen HotSync über WLAN braucht ein Tab den Anschluss „Netzwerk (WLAN)“.",
+        "At each cable HotSync the Palm gets this Mac's address and name (\(ip ?? "–"), \(name)) in its network HotSync settings, as HotSync Manager did. HotSync › menu › Primary PC Setup then already shows this Mac; a HotSync over Wi-Fi needs a tab on the “Network (Wi-Fi)” port."
+    ) }
+    static func logNetSyncSet(_ address: String, _ name: String) -> String { s(
+        "Primärer PC im Palm eingetragen: \(name) (\(address))", "Primary PC written to the Palm: \(name) (\(address))"
+    ) }
+    static var logNetSyncNoAddress: String { s(
+        "Kein primärer PC eingetragen: dieser Mac hat keine Netzwerkadresse", "Primary PC not written: this Mac has no network address"
+    ) }
+    static func logDryRunNetSync(_ address: String) -> String { s(
+        "Probelauf: dieser Mac (\(address)) würde als primärer PC eingetragen", "Dry run: this Mac (\(address)) would be written as the primary PC"
+    ) }
     static var clockSyncToggle: String { s("Uhr des Palms vom Mac stellen", "Set the Palm's clock from the Mac") }
     static var clockSyncHint: String { s(
         "Bei jedem HotSync, wie beim HotSync-Manager.", "At each HotSync, as the HotSync Manager did."

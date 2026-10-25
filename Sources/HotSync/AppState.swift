@@ -919,6 +919,8 @@ final class AppState {
         // Zeitzonen: Orte lesen, abweichende neu schreiben, schließen
         case .timeSet(let date):
             if let tabId = session.tabId { tabLog(tabId, L10n.logTimeSet(date)) }
+        case .netSyncSet(let address, let name):
+            if let tabId = session.tabId { tabLog(tabId, L10n.logNetSyncSet(address, name)) }
         case .dbOpened where session.stage == .fixingLocations:
             session.runner.send("readall")
         case .record(let id, _, let attrs, let category, let data) where session.stage == .fixingLocations:
@@ -968,6 +970,12 @@ final class AppState {
     func setZoneSync(_ on: Bool, for profileId: UUID) {
         guard var profile = deviceManager.profile(profileId) else { return }
         profile.zoneSync = on
+        deviceManager.updateProfile(profile)
+    }
+
+    func setNetSync(_ on: Bool, for profileId: UUID) {
+        guard var profile = deviceManager.profile(profileId) else { return }
+        profile.netSync = on
         deviceManager.updateProfile(profile)
     }
 
@@ -1164,6 +1172,18 @@ final class AppState {
             // Uhr vom Mac jetzt, Zeitzonen nach der Sicherung
             if profile.isClockSyncOn {
                 if dry { tabLog(tabId, L10n.logDryRunClock) } else { session.runner.send("settime") }
+            }
+            // über Kabel: diesen Mac als primären PC für den Netzwerk-HotSync eintragen
+            if profile.isNetSyncOn, session.runner.port != SyncTab.networkPort {
+                if let address = LocalAddress.ipv4().first {
+                    if dry {
+                        tabLog(tabId, L10n.logDryRunNetSync(address.ip))
+                    } else {
+                        session.runner.send("netsync \(address.ip) \(address.netmask) \(LocalAddress.computerName)")
+                    }
+                } else {
+                    tabLog(tabId, L10n.logNetSyncNoAddress)
+                }
             }
             if profile.isZoneSyncOn { session.fixDatabases = ["locLTimeZoneDB", "locLDefLocationDB", "locLCusLocationDB"] }
             // Erst sichern, dann ersetzen: ohne Sicherung dieses Palms gehen

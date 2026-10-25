@@ -68,6 +68,8 @@ public enum SessionEvent: Equatable, Sendable {
     case syncInfoWritten(pcId: UInt32, date: Date)
     /// the Palm's clock was set to the Mac's time
     case timeSet(Date)
+    /// this Mac is the Palm's primary PC for network HotSync now
+    case netSyncSet(address: String, name: String)
 
     private struct Line: Decodable {
         let event: String
@@ -100,6 +102,7 @@ public enum SessionEvent: Equatable, Sendable {
         let modifiedOnly: Int?
         let pcId: UInt32?
         let date: Int?
+        let address: String?
     }
 
     /// Reads one output line; nil for anything that is not a known event
@@ -198,6 +201,9 @@ public enum SessionEvent: Equatable, Sendable {
         case "timeSet":
             guard let date = l.date else { return nil }
             return .timeSet(Date(timeIntervalSince1970: TimeInterval(date)))
+        case "netSyncSet":
+            guard let address = l.address else { return nil }
+            return .netSyncSet(address: address, name: l.name ?? "")
         default:
             return nil
         }

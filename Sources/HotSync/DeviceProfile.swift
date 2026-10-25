@@ -42,8 +42,13 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     /// nachführen; nil = an
     var zoneSync: Bool?
 
+    /// Diesen Mac bei jedem Kabel-HotSync als primären PC für den
+    /// Netzwerk-HotSync in den Palm schreiben; nil = aus
+    var netSync: Bool?
+
     var isClockSyncOn: Bool { clockSync ?? true }
     var isZoneSyncOn: Bool { zoneSync ?? true }
+    var isNetSyncOn: Bool { netSync ?? false }
 
     var palmOS: PalmOSVersion? { romVersion.map(PalmOSVersion.init(rom:)) }
 

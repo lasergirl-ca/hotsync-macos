@@ -798,6 +798,16 @@ struct TimeSyncSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                Toggle(isOn: Binding(
+                    get: { appState.deviceManager.profile(profileId)?.isNetSyncOn ?? false },
+                    set: { appState.setNetSync($0, for: profileId) }
+                )) {
+                    Text(L10n.netSyncToggle)
+                }
+                Text(L10n.netSyncHint(LocalAddress.ipv4().first?.ip, LocalAddress.computerName))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)   // so breit wie die anderen Abschnitte
             .padding(4)
