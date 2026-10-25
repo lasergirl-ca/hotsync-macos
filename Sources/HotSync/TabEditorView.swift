@@ -26,16 +26,23 @@ struct TabEditorView: View {
 
                 Picker(L10n.tabPort, selection: $draft.port) {
                     Text("USB").tag(SyncTab.usbPort)
+                    Text(L10n.portNetwork).tag(SyncTab.networkPort)
                     ForEach(appState.portMonitor.serialPorts) { port in
                         Text(serialLabel(port)).tag(port.id)
                     }
                     // ein gespeicherter Adapter, der gerade nicht steckt
-                    if !draft.isUSB && appState.portMonitor.serialPort(draft.port) == nil {
+                    if draft.isSerial && appState.portMonitor.serialPort(draft.port) == nil {
                         Text(L10n.tabPortMissing(draft.portLabel)).tag(draft.port)
                     }
                 }
+                if draft.isNetwork {
+                    Text(L10n.portNetworkHint(LocalAddress.ipv4().map { "\($0.ip) (\($0.interface))" }))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-                if !draft.isUSB {
+                if draft.isSerial {
                     Picker(L10n.tabBaudRate, selection: $draft.baudRate) {
                         ForEach(SyncTab.baudRates, id: \.self) { rate in
                             Text("\(rate)").tag(rate)

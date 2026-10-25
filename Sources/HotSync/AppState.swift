@@ -1930,7 +1930,7 @@ final class AppState {
     // MARK: - Log
 
     func portLabel(_ port: String) -> String {
-        port == SyncTab.usbPort ? "USB" : (port as NSString).lastPathComponent
+        SyncTab.label(port)
     }
 
     private static let timeFormatter: DateFormatter = {

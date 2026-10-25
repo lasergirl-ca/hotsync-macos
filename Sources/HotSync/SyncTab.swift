@@ -46,11 +46,25 @@ struct SyncTab: Codable, Identifiable, Equatable {
     static let defaultBaudRate = 57600
     static let baudRates = [9600, 19200, 38400, 57600, 115200]
 
-    var isUSB: Bool { port == Self.usbPort }
+    /// Netzwerk-HotSync: libpisock lauscht auf TCP 14238 (NetSync), der Palm
+    /// verbindet sich über WLAN mit der Adresse des "primären PCs".
+    static let networkPort = "net:any"
 
-    /// Kurzname des Anschlusses für Tab-Titel: "USB", "cu.usbserial-A1".
+    var isUSB: Bool { port == Self.usbPort }
+    var isNetwork: Bool { port == Self.networkPort }
+    var isSerial: Bool { !isUSB && !isNetwork }
+
+    /// Kurzname des Anschlusses für Tab-Titel: "USB", "Wi-Fi", "cu.usbserial-A1".
     var portLabel: String {
-        isUSB ? "USB" : (port as NSString).lastPathComponent
+        Self.label(port)
+    }
+
+    static func label(_ port: String) -> String {
+        switch port {
+        case usbPort: return "USB"
+        case networkPort: return "Wi-Fi"
+        default: return (port as NSString).lastPathComponent
+        }
     }
 }
 

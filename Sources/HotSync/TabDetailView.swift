@@ -256,7 +256,10 @@ struct TabDetailView: View {
     /// sich zuletzt gemeldet hat.
     private var portText: String {
         var parts: [String] = []
-        if !tab.isUSB {
+        if tab.isNetwork {
+            parts.append(L10n.portNetworkAddress(LocalAddress.ipv4().first?.ip))
+        }
+        if tab.isSerial {
             if let serial = appState.portMonitor.serialPort(tab.port) {
                 parts.append(serial.connectedAt.map {
                     L10n.portConnectedAt($0.formatted(date: .omitted, time: .shortened))

@@ -182,6 +182,17 @@ enum L10n {
     static var tabPort: String { s("Anschluss", "Port") }
     static func tabPortMissing(_ name: String) -> String { s("\(name) (nicht verbunden)", "\(name) (not connected)") }
     static var tabBaudRate: String { s("Baudrate", "Baud rate") }
+    static var portNetwork: String { s("Netzwerk (WLAN)", "Network (Wi-Fi)") }
+    static func portNetworkHint(_ addresses: [String]) -> String {
+        let list = addresses.isEmpty ? s("keine Netzwerkadresse", "no network address") : addresses.joined(separator: ", ")
+        return s(
+            "Lauscht auf TCP 14238 wie der HotSync-Manager (Netzwerk-HotSync). Auf dem Palm: HotSync › Menü › Modem-Sync-Einst. › Netzwerk, dann Menü › Primärer PC-Setup, als Adresse die dieses Macs eintragen: \(list). Beim ersten Mal fragt macOS, ob HotSync eingehende Verbindungen annehmen darf.",
+            "Listens on TCP 14238 like HotSync Manager did (network HotSync). On the Palm: HotSync › menu › Modem Sync Prefs › Network, then menu › Primary PC Setup, and enter this Mac's address: \(list). The first time, macOS asks whether HotSync may accept incoming connections."
+        )
+    }
+    static func portNetworkAddress(_ ip: String?) -> String {
+        s("Adresse dieses Macs: \(ip ?? "–")", "this Mac's address: \(ip ?? "–")")
+    }
     static var tabSyncMode: String { s("HotSync", "HotSync") }
     static var tabSyncModeFull: String { s("Installieren + Sichern", "Install + Back Up") }
     static var tabSyncModeInstall: String { s("Nur installieren", "Install Only") }
