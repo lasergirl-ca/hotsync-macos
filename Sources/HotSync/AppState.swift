@@ -608,6 +608,8 @@ final class AppState {
         var fixUnknown = 0
         /// die korrigierte Datenbank, die nach dem Schließen installiert wird
         var fixInstall: URL?
+        /// die Zonennamen des Palms (locLTimeZoneDB), für die Reihenfolge
+        var zoneTable = PalmZoneTable(zones: [])
         var restoreFiles: [URL] = []
         var restoreDone = 0
         var restoreFailed = 0
@@ -1018,7 +1020,7 @@ final class AppState {
         if mode.syncs, let profile = deviceManager.profile(profileId) {
             // Uhr vom Mac jetzt, Zeitzonen nach der Sicherung
             if profile.isClockSyncOn { session.runner.send("settime") }
-            if profile.isZoneSyncOn { session.fixDatabases = ["locLDefLocationDB", "locLCusLocationDB"] }
+            if profile.isZoneSyncOn { session.fixDatabases = ["locLTimeZoneDB", "locLDefLocationDB", "locLCusLocationDB"] }
         }
         if mode.syncs, let profile = deviceManager.profile(profileId) {
             // Erst sichern, dann ersetzen: ohne Sicherung dieses Palms gehen
@@ -1233,6 +1235,12 @@ final class AppState {
     private func locationsRead(_ session: Session) {
         guard let tabId = session.tabId, let name = session.fixing, let profileId = session.profileId,
               let profile = deviceManager.profile(profileId) else { return }
+        if name == "locLTimeZoneDB" {
+            // nur gelesen: die Zonennamen, nach denen der Palm seine Orte ordnet
+            session.zoneTable = PalmZoneTable(records: session.calendarRecords.map(\.data))
+            session.runner.send("closedb")
+            return
+        }
         session.fixTotal = session.calendarRecords.count
         var records: [PalmDatabase.Record] = []
         for record in session.calendarRecords where !record.isDeleted {
@@ -1250,7 +1258,21 @@ final class AppState {
         }
         tabLog(tabId, L10n.logLocationsDone(name, session.fixChanged, session.fixTotal, session.fixUnknown))
 
-        if session.fixChanged > 0 {
+        // Die Auswahlliste des Palms geht davon aus, dass die eingebauten Orte
+        // nach Zonenname und Stadt gespeichert sind: ändert sich eine Zone,
+        // wird der Länderblock so sortiert, sonst öffnet "Vancouver" St. John's
+        var reordered = false
+        if name == "locLDefLocationDB" {
+            let sorted = TimeZoneFixups.reorderWithinCountries(records, location: { try? PalmLocation(data: $0.data) },
+                                                               zones: session.zoneTable)
+            if sorted.map(\.uniqueID) != records.map(\.uniqueID) {
+                reordered = true
+                records = sorted
+                tabLog(tabId, L10n.logLocationsReordered)
+            }
+        }
+
+        if session.fixChanged > 0 || reordered {
             // wie die des Palms: Version 2, Backup-Flag, Typ DATA (eingebaute) / DATC (eigene)
             var db = PalmDatabase(name: name, type: name == "locLCusLocationDB" ? "DATC" : "DATA", creator: "locL",
                                   attributes: 0x0008, version: 2)

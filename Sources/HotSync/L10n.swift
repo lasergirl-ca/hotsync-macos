@@ -555,6 +555,10 @@ enum L10n {
         "\(name): \(changed) von \(total) Orten abweichend, \(unknown) ohne bekannte Zone",
         "\(name): \(changed) of \(total) locations differ, \(unknown) with no known zone"
     ) }
+    static var logLocationsReordered: String { s(
+        "Orte in die Reihenfolge der Auswahlliste gebracht (Zone, dann Stadt)",
+        "Locations put in the picker's order (zone, then city)"
+    ) }
     static func logLocationsInstalled(_ name: String) -> String { s(
         "\(name) korrigiert auf den Palm gespielt", "\(name) installed with the corrections"
     ) }

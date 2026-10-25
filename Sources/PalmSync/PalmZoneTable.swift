@@ -39,3 +39,40 @@ public struct PalmZoneTable: Equatable, Sendable {
         return ofCountry.count == 1 ? ofCountry[0].name : nil
     }
 }
+
+extension TimeZoneFixups {
+    /// The Date & Time picker sorts its list by zone name, then city, and
+    /// assumes the default location database is stored in that order: it
+    /// opens the n-th record for the n-th row. Countries are contiguous
+    /// blocks in the database, so when a fix changes a location's zone
+    /// (Vancouver from "Canada (Pacific)" to "Canada (Mountain)"), its
+    /// country's block is re-sorted the picker's way. Blocks with a zone
+    /// the table cannot name are left alone.
+    public static func reorderWithinCountries<T>(_ records: [T], location: (T) -> PalmLocation?,
+                                                 zones: PalmZoneTable) -> [T] {
+        var result: [T] = []
+        var block: [(T, PalmLocation)] = []
+        func flush() {
+            defer { block = [] }
+            guard block.count > 1 else { result += block.map(\.0); return }
+            let keys: [(String, String)?] = block.map { _, l in
+                guard let zone = zones.name(country: l.timezone.country, offsetMinutes: l.timezone.offsetMinutes) else { return nil }
+                return (zone.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil),
+                        l.name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil))
+            }
+            guard keys.allSatisfy({ $0 != nil }) else { result += block.map(\.0); return }
+            let order = block.indices.sorted { a, b in
+                let ka = keys[a]!, kb = keys[b]!
+                return ka == kb ? a < b : ka < kb
+            }
+            result += order.map { block[$0].0 }
+        }
+        for record in records {
+            guard let l = location(record) else { flush(); result.append(record); continue }
+            if let last = block.last, last.1.timezone.country != l.timezone.country { flush() }
+            block.append((record, l))
+        }
+        flush()
+        return result
+    }
+}

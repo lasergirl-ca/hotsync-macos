@@ -97,3 +97,25 @@ private let now = ISO8601DateFormatter().date(from: "2026-10-24T12:00:00Z")!
     #expect(table.name(country: 175, offsetMinutes: 300) == "Pakistan")
 
 }
+
+@Test func canadaBlockIsReorderedThePickersWay() throws {
+    let url = try #require(Bundle.module.url(forResource: "locLTimeZoneDB", withExtension: "pdb", subdirectory: "Fixtures/device"))
+    let zones = PalmZoneTable(records: try PalmDatabase(data: try Data(contentsOf: url)).records.map(\.data))
+    let devURL = try #require(Bundle.module.url(forResource: "locLDefLocationDB", withExtension: "pdb", subdirectory: "Fixtures/device"))
+    var locations = try PalmDatabase(data: try Data(contentsOf: devURL)).records.map { try PalmLocation(data: $0.data) }
+
+    // untouched, the device order is already the picker's order
+    let same = TimeZoneFixups.reorderWithinCountries(locations, location: { $0 }, zones: zones)
+    #expect(same.map(\.name) == locations.map(\.name))
+
+    // Vancouver to Mountain, Edmonton to Central: the Canada block re-sorts, nothing else moves
+    for i in locations.indices {
+        if locations[i].name == "Vancouver" { locations[i].timezone.offsetMinutes = -420; locations[i].timezone.observesDST = false }
+        if locations[i].name == "Edmonton" { locations[i].timezone.offsetMinutes = -360; locations[i].timezone.observesDST = false }
+    }
+    let sorted = TimeZoneFixups.reorderWithinCountries(locations, location: { $0 }, zones: zones)
+    let canada = sorted.filter { $0.timezone.country == 4 }.map(\.name)
+    #expect(canada == ["Halifax", "Edmonton", "Regina", "Winnipeg", "Montreal", "Toronto", "Vancouver", "St. John's"])
+    #expect(sorted.filter { $0.timezone.country != 4 }.map(\.name) == locations.filter { $0.timezone.country != 4 }.map(\.name))
+    #expect(sorted.firstIndex { $0.name == "Halifax" } == locations.firstIndex { $0.name == "Halifax" })
+}
