@@ -548,22 +548,33 @@ enum L10n {
         "Dry run: \(name) would be installed (\(records) records, \(bytes) bytes), kept under Sync/DryRun"
     ) }
     static var twoWayToggle: String { s("In beide Richtungen", "Two-way") }
+    static var twoWayHintContacts: String { s(
+        "Der HotSync liest die Kontakte des Palms, führt sie Feld für Feld mit dem Mac zusammen und schreibt beide Seiten: Mac-Änderungen über das Contacts-Framework in Kontakte.app (und damit in iCloud), der Palm bekommt die zusammengeführten Kontakte als Ganzes. Notizen und was über die Felder des Palms hinausgeht, bleibt auf dem Mac.",
+        "The HotSync reads the Palm's contacts, merges them field by field with the Mac and writes both sides: Mac changes through the Contacts framework into Contacts.app (and on to iCloud), the Palm gets the merged contacts whole. Notes and whatever exceeds the Palm's fields stay on the Mac."
+    ) }
+    static var twoWayHintTasks: String { s(
+        "Der HotSync liest die Aufgaben des Palms, führt sie Feld für Feld mit dem Mac zusammen und schreibt beide Seiten: Mac-Änderungen über EventKit in Erinnerungen.app (und damit in iCloud), der Palm bekommt die zusammengeführten Aufgaben als Ganzes.",
+        "The HotSync reads the Palm's tasks, merges them field by field with the Mac and writes both sides: Mac changes through EventKit into Reminders.app (and on to iCloud), the Palm gets the merged tasks whole."
+    ) }
     static var twoWayHint: String { s(
         "Der HotSync liest den Kalender des Palms, führt ihn Feld für Feld mit dem Mac zusammen und schreibt beide Seiten: Mac-Änderungen über EventKit in Calendar.app (und damit in iCloud/Google), der Palm bekommt den zusammengeführten Kalender als Ganzes. Beim ersten Mal lohnt ein Probelauf.",
         "The HotSync reads the Palm's calendar, merges it field by field with the Mac and writes both sides: Mac changes through EventKit into Calendar.app (and on to iCloud/Google), the Palm gets the merged calendar whole. A dry run first is worth it."
     ) }
-    static var logTwoWayPending: String { s(
-        "Kalender: Abgleich in beide Richtungen nach der Sicherung; der Kalender wird nicht als Ganzes installiert",
-        "Calendar: two-way sync after the backup; the calendar is not installed whole"
+    static var twoWayCalendar: String { s("Kalender", "Calendar") }
+    static var twoWayContacts: String { s("Kontakte", "Contacts") }
+    static var twoWayTasks: String { s("Aufgaben", "Tasks") }
+    static func logTwoWayPending(_ what: String) -> String { s(
+        "\(what): Abgleich in beide Richtungen nach der Sicherung; nichts wird als Ganzes installiert",
+        "\(what): two-way sync after the backup; nothing is installed whole"
     ) }
-    static var logTwoWayReading: String { s("Kalender: lese den Kalender des Palms …", "Calendar: reading the Palm's calendar …") }
-    static func logTwoWayMode(fast: Bool, lastSyncPC: UInt32, mirrorEntries: Int) -> String { s(
-        fast ? "Kalender: schneller Abgleich möglich (Spiegel mit \(mirrorEntries) Einträgen, letzter PC passt)" : "Kalender: langsamer Abgleich (Spiegel: \(mirrorEntries) Einträge, letzter PC \(lastSyncPC)); Datensätze werden nach Inhalt gepaart",
-        fast ? "Calendar: a fast sync will do (mirror with \(mirrorEntries) entries, last PC matches)" : "Calendar: slow sync (mirror: \(mirrorEntries) entries, last PC \(lastSyncPC)); records are paired by content"
+    static func logTwoWayReading(_ what: String) -> String { s("\(what): lese vom Palm …", "\(what): reading from the Palm …") }
+    static func logTwoWayMode(_ what: String, fast: Bool, lastSyncPC: UInt32, mirrorEntries: Int) -> String { s(
+        fast ? "\(what): schneller Abgleich möglich (Spiegel mit \(mirrorEntries) Einträgen, letzter PC passt)" : "\(what): langsamer Abgleich (Spiegel: \(mirrorEntries) Einträge, letzter PC \(lastSyncPC)); Datensätze werden nach Inhalt gepaart",
+        fast ? "\(what): a fast sync will do (mirror with \(mirrorEntries) entries, last PC matches)" : "\(what): slow sync (mirror: \(mirrorEntries) entries, last PC \(lastSyncPC)); records are paired by content"
     ) }
-    static func logTwoWaySummary(toPalm: Int, palmDeletes: Int, toMac: Int, macDeletes: Int, conflicts: Int, policy: ConflictPolicy) -> String { s(
-        "Kalender: \(toPalm) auf den Palm, \(palmDeletes) dort löschen; \(toMac) auf den Mac, \(macDeletes) dort löschen; \(conflicts) Konflikte (\(conflictPolicyName(policy)))",
-        "Calendar: \(toPalm) to the Palm, \(palmDeletes) deleted there; \(toMac) to the Mac, \(macDeletes) deleted there; \(conflicts) conflicts (\(conflictPolicyName(policy)))"
+    static func logTwoWaySummary(_ what: String, toPalm: Int, palmDeletes: Int, toMac: Int, macDeletes: Int, conflicts: Int, policy: ConflictPolicy) -> String { s(
+        "\(what): \(toPalm) auf den Palm, \(palmDeletes) dort löschen; \(toMac) auf den Mac, \(macDeletes) dort löschen; \(conflicts) Konflikte (\(conflictPolicyName(policy)))",
+        "\(what): \(toPalm) to the Palm, \(palmDeletes) deleted there; \(toMac) to the Mac, \(macDeletes) deleted there; \(conflicts) conflicts (\(conflictPolicyName(policy)))"
     ) }
     static var conflictPolicyLabel: String { s("Bei Konflikten:", "On conflicts:") }
     static func conflictPolicyName(_ p: ConflictPolicy) -> String {
@@ -596,8 +607,8 @@ enum L10n {
         "Mac: \(created) neu, \(updated) geändert, \(deleted) gelöscht", "Mac: \(created) created, \(updated) updated, \(deleted) deleted"
     ) }
     static func logTwoWayMacFailure(_ text: String) -> String { s("Mac, nicht geschrieben: \(text)", "Mac, not written: \(text)") }
-    static func logTwoWayPalmInstalling(_ records: Int) -> String { s(
-        "Palm: der zusammengeführte Kalender (\(records) Einträge) wird installiert …", "Palm: installing the merged calendar (\(records) records) …"
+    static func logTwoWayPalmInstalling(_ what: String, _ records: Int) -> String { s(
+        "Palm: \(what) zusammengeführt (\(records) Einträge) wird installiert …", "Palm: installing the merged \(what) (\(records) records) …"
     ) }
     static func logTwoWayMirrorSaved(_ entries: Int) -> String { s(
         "Spiegel gespeichert: \(entries) Einträge", "Mirror saved: \(entries) entries"
@@ -605,6 +616,7 @@ enum L10n {
     static var logTwoWayDone: String { s("Abgleich in beide Richtungen fertig; dieser Mac ist als letzter PC eingetragen", "Two-way sync done; this Mac is recorded as the last PC") }
     static func logTwoWayFailed(_ reason: String) -> String { s("Probelauf abgebrochen: \(reason)", "Dry run stopped: \(reason)") }
     static var taskSyncTitle: String { s("Aufgaben: Mac → Palm", "Tasks: Mac → Palm") }
+    static var taskSyncTitleTwoWay: String { s("Aufgaben: Mac ↔ Palm", "Tasks: Mac ↔ Palm") }
     static var taskSyncToggle: String { s("Aufgaben abgleichen", "Sync Tasks") }
     static var taskSyncChoose: String { s("Listen wählen", "Choose lists") }
     static var taskSyncWarning: String { s(
@@ -676,6 +688,7 @@ enum L10n {
         "Zeitzonen in \(name) nicht geändert (\(stage): \(message))", "Time zones in \(name) not changed (\(stage): \(message))"
     ) }
     static var contactSyncTitle: String { s("Kontakte: Mac → Palm", "Contacts: Mac → Palm") }
+    static var contactSyncTitleTwoWay: String { s("Kontakte: Mac ↔ Palm", "Contacts: Mac ↔ Palm") }
     static var contactSyncToggle: String { s("Kontakte abgleichen", "Sync Contacts") }
     static var contactSyncChoose: String { s("Konten wählen", "Choose accounts") }
     static var contactSyncWarning: String { s(

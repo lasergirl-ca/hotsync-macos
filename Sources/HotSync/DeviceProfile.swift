@@ -28,8 +28,14 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     /// Kalender des Macs ersetzt den des Palms.
     var calendarTwoWay: Bool?
 
+    /// Kontakte und Aufgaben ebenso in beide Richtungen.
+    var contactTwoWay: Bool?
+    var taskTwoWay: Bool?
+
     var isDryRun: Bool { dryRun ?? false }
     var isCalendarTwoWay: Bool { calendarTwoWay ?? false }
+    var isContactTwoWay: Bool { contactTwoWay ?? false }
+    var isTaskTwoWay: Bool { taskTwoWay ?? false }
     /// Die Uhr des Palms bei jedem HotSync vom Mac stellen; nil = an
     var clockSync: Bool?
     /// Die Zeitzonen-Regeln der Orte des Palms aus der tzdata des Macs

@@ -1,4 +1,5 @@
 import EventKit
+import PalmSync
 import PalmSyncMac
 import SwiftUI
 
@@ -39,9 +40,30 @@ struct TaskSyncSection: View {
                     .disabled(accessStatus != .fullAccess)
                 }
                 if settings.enabled {
-                    Text(L10n.taskSyncWarning)
+                    let twoWay = appState.deviceManager.profile(profileId)?.isTaskTwoWay ?? false
+                    Text(twoWay ? L10n.twoWayHintTasks : L10n.taskSyncWarning)
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(twoWay ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 16) {
+                        Toggle(isOn: Binding(
+                            get: { appState.deviceManager.profile(profileId)?.isTaskTwoWay ?? false },
+                            set: { appState.setTaskTwoWay($0, for: profileId) }
+                        )) {
+                            Text(L10n.twoWayToggle)
+                        }
+                        if twoWay {
+                            Picker(selection: Binding(get: { settings.conflicts }, set: { v in update { $0.conflictPolicy = v } })) {
+                                ForEach(ConflictPolicy.allCases, id: \.self) { Text(L10n.conflictPolicyName($0)).tag($0) }
+                            } label: {
+                                Text(L10n.conflictPolicyLabel)
+                            }
+                            .pickerStyle(.menu)
+                            .fixedSize()
+                            .help(L10n.conflictPolicyHelp)
+                        }
+                    }
+                    .font(.caption)
                 }
 
                 switch accessStatus {
@@ -59,7 +81,7 @@ struct TaskSyncSection: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(4)
         } label: {
-            Label(L10n.taskSyncTitle, systemImage: "checklist")
+            Label(appState.deviceManager.profile(profileId)?.isTaskTwoWay == true ? L10n.taskSyncTitleTwoWay : L10n.taskSyncTitle, systemImage: "checklist")
         }
         .onAppear {
             refreshAccess()

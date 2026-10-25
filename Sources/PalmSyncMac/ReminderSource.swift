@@ -118,12 +118,17 @@ public struct TaskSyncSettings: Codable, Equatable, Sendable {
     public var enabled: Bool
     public var lists: [Choice]
     public var keepCompletedDays: Int
+    /// nil (profiles from before the setting): the Mac wins
+    public var conflictPolicy: ConflictPolicy?
 
-    public init(enabled: Bool = false, lists: [Choice] = [], keepCompletedDays: Int = 30) {
+    public init(enabled: Bool = false, lists: [Choice] = [], keepCompletedDays: Int = 30, conflictPolicy: ConflictPolicy? = nil) {
         self.enabled = enabled
         self.lists = lists
         self.keepCompletedDays = keepCompletedDays
+        self.conflictPolicy = conflictPolicy
     }
+
+    public var conflicts: ConflictPolicy { conflictPolicy ?? .macWins }
 }
 
 /// One run of the one-way tasks sync, checked by reading it back.

@@ -1,4 +1,5 @@
 import Contacts
+import PalmSync
 import PalmSyncMac
 import SwiftUI
 
@@ -38,9 +39,30 @@ struct ContactSyncSection: View {
                     .disabled(accessStatus != .authorized)
                 }
                 if settings.enabled {
-                    Text(L10n.contactSyncWarning)
+                    let twoWay = appState.deviceManager.profile(profileId)?.isContactTwoWay ?? false
+                    Text(twoWay ? L10n.twoWayHintContacts : L10n.contactSyncWarning)
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(twoWay ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 16) {
+                        Toggle(isOn: Binding(
+                            get: { appState.deviceManager.profile(profileId)?.isContactTwoWay ?? false },
+                            set: { appState.setContactTwoWay($0, for: profileId) }
+                        )) {
+                            Text(L10n.twoWayToggle)
+                        }
+                        if twoWay {
+                            Picker(selection: Binding(get: { settings.conflicts }, set: { v in update { $0.conflictPolicy = v } })) {
+                                ForEach(ConflictPolicy.allCases, id: \.self) { Text(L10n.conflictPolicyName($0)).tag($0) }
+                            } label: {
+                                Text(L10n.conflictPolicyLabel)
+                            }
+                            .pickerStyle(.menu)
+                            .fixedSize()
+                            .help(L10n.conflictPolicyHelp)
+                        }
+                    }
+                    .font(.caption)
                 }
 
                 switch accessStatus {
@@ -57,7 +79,7 @@ struct ContactSyncSection: View {
             }
             .padding(4)
         } label: {
-            Label(L10n.contactSyncTitle, systemImage: "person.crop.circle")
+            Label(appState.deviceManager.profile(profileId)?.isContactTwoWay == true ? L10n.contactSyncTitleTwoWay : L10n.contactSyncTitle, systemImage: "person.crop.circle")
         }
         .onAppear {
             refreshAccess()

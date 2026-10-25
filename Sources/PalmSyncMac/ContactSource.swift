@@ -132,11 +132,16 @@ public struct ContactSyncSettings: Codable, Equatable, Sendable {
 
     public var enabled: Bool
     public var containers: [Choice]
+    /// nil (profiles from before the setting): the Mac wins
+    public var conflictPolicy: ConflictPolicy?
 
-    public init(enabled: Bool = false, containers: [Choice] = []) {
+    public init(enabled: Bool = false, containers: [Choice] = [], conflictPolicy: ConflictPolicy? = nil) {
         self.enabled = enabled
         self.containers = containers
+        self.conflictPolicy = conflictPolicy
     }
+
+    public var conflicts: ConflictPolicy { conflictPolicy ?? .macWins }
 }
 
 /// One run of the one-way contacts sync, checked by reading it back.

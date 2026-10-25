@@ -611,14 +611,17 @@ final class AppState {
         var fixInstall: URL?
         /// die Zonennamen des Palms (locLTimeZoneDB), für die Reihenfolge
         var zoneTable = PalmZoneTable(zones: [])
-        /// Kalender in beide Richtungen (Probelauf): nach der Sicherung
-        var twoWayCalendar = false
+        /// in beide Richtungen nach der Sicherung: diese Datenbanken, der Reihe nach
+        var twoWayDatabases: [String] = []
+        var twoWayCurrent: String?
         /// aus dem syncInfo-Ereignis: welcher PC zuletzt abgeglichen hat
         var lastSyncPC: UInt32 = 0
-        /// der zusammengeführte Kalender, der nach dem Schließen installiert
-        /// wird, und der Spiegel, der danach gespeichert wird
+        /// die zusammengeführte Datenbank, die nach dem Schließen installiert
+        /// wird, und der Spiegel, der danach gespeichert wird (liefert die Zahl
+        /// seiner Einträge); der PC, der dann als letzter eingetragen wird
         var twoWayInstall: URL?
-        var twoWayMirror: CalendarMirror?
+        var twoWayMirrorSave: (() throws -> Int)?
+        var twoWayPCID: UInt32 = 0
         var restoreFiles: [URL] = []
         var restoreDone = 0
         var restoreFailed = 0
@@ -724,13 +727,13 @@ final class AppState {
             session.calendarRecords.append(PalmRecordIn(id: id, attributes: attrs, category: category, data: data))
         case .recordsDone where session.stage == .twoWayCalendar:
             twoWayPlanned(session)
-            session.runner.send("closedb")
+            if session.twoWayCurrent != TasksBuilder.databaseName { session.runner.send("closedb") }
         case .dbClosed where session.stage == .twoWayCalendar:
             if let url = session.twoWayInstall {
                 session.twoWayInstall = nil
                 session.runner.send("install \(url.path)")
             } else {
-                fixLocations(session)
+                twoWayNext(session)
             }
         case .installing where session.stage == .twoWayCalendar:
             break
@@ -738,18 +741,18 @@ final class AppState {
             twoWayInstalled(session)
         case .failed(_, let failure) where session.stage == .twoWayCalendar:
             if let tabId = session.tabId { tabLog(tabId, L10n.logTwoWayFailed(L10n.failureText(failure))) }
-            session.twoWayMirror = nil
-            fixLocations(session)
+            session.twoWayMirrorSave = nil
+            twoWayNext(session)
         case .syncInfoWritten where session.stage == .twoWayCalendar:
             if let tabId = session.tabId { tabLog(tabId, L10n.logTwoWayDone) }
-            fixLocations(session)
+            twoWayNext(session)
         case .error(let stage, let message) where session.stage == .twoWayCalendar && stage == "syncinfo":
             if let tabId = session.tabId { tabLog(tabId, L10n.logTwoWayFailed("\(stage): \(message)")) }
-            fixLocations(session)
+            twoWayNext(session)
         case .error(let stage, let message) where session.stage == .twoWayCalendar
             && ["opendb", "readappinfo", "readall", "closedb"].contains(stage):
             if let tabId = session.tabId { tabLog(tabId, L10n.logTwoWayFailed("\(stage): \(message)")) }
-            if stage == "readall" || stage == "readappinfo" { session.runner.send("closedb") } else { fixLocations(session) }
+            if stage == "readall" || stage == "readappinfo" { session.runner.send("closedb") } else { twoWayNext(session) }
 
         // Zeitzonen: die korrigierte Ortsdatenbank wird installiert - vor den
         // allgemeinen Fällen, sonst zählt sie als Datei der Warteschlange
@@ -954,6 +957,18 @@ final class AppState {
         deviceManager.updateProfile(profile)
     }
 
+    func setContactTwoWay(_ on: Bool, for profileId: UUID) {
+        guard var profile = deviceManager.profile(profileId) else { return }
+        profile.contactTwoWay = on
+        deviceManager.updateProfile(profile)
+    }
+
+    func setTaskTwoWay(_ on: Bool, for profileId: UUID) {
+        guard var profile = deviceManager.profile(profileId) else { return }
+        profile.taskTwoWay = on
+        deviceManager.updateProfile(profile)
+    }
+
     func setTaskSync(_ settings: TaskSyncSettings, for profileId: UUID) {
         guard var profile = deviceManager.profile(profileId) else { return }
         profile.taskSync = settings
@@ -1123,8 +1138,8 @@ final class AppState {
             if let settings = profile.calendarSync, settings.enabled {
                 if profile.isCalendarTwoWay {
                     // nach der Sicherung: Palm lesen, zusammenführen, dann schreiben
-                    session.twoWayCalendar = true
-                    tabLog(tabId, L10n.logTwoWayPending)
+                    session.twoWayDatabases.append(CalendarBuilder.databaseName)
+                    tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayCalendar))
                 } else if profile.lastBackupAt == nil {
                     tabLog(tabId, L10n.logCalendarNeedsBackup)
                 } else {
@@ -1133,18 +1148,24 @@ final class AppState {
                 }
             }
             if let settings = profile.contactSync, settings.enabled {
-                if profile.lastBackupAt == nil {
+                if profile.isContactTwoWay {
+                    session.twoWayDatabases.append(ContactsBuilder.databaseName)
+                    tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayContacts))
+                } else if profile.lastBackupAt == nil {
                     tabLog(tabId, L10n.logContactsNeedBackup)
                 } else {
                     queueContacts(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry)
+                    if !dry { session.checkDatabases.append(ContactsBuilder.databaseName) }
                 }
-                if !dry { session.checkDatabases.append(ContactsBuilder.databaseName) }
             }
             if let settings = profile.taskSync, settings.enabled {
-                if !dry { session.checkDatabases.append(TasksBuilder.databaseName) }
-                if profile.lastBackupAt == nil {
+                if profile.isTaskTwoWay {
+                    session.twoWayDatabases.append(TasksBuilder.databaseName)
+                    tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayTasks))
+                } else if profile.lastBackupAt == nil {
                     tabLog(tabId, L10n.logTasksNeedBackup)
                 } else {
+                    if !dry { session.checkDatabases.append(TasksBuilder.databaseName) }
                     // Reminders liefert asynchron; der Palm wartet solange (Lebenszeichen)
                     Task { @MainActor [weak self, weak session] in
                         guard let self, let session else { return }
@@ -1288,7 +1309,7 @@ final class AppState {
     /// prüfen, eine nach der anderen, dann die Zeitzonen, dann das ROM.
     private func afterBackup(_ session: Session) {
         guard !session.checkDatabases.isEmpty, let tabId = session.tabId, let user = session.user else {
-            twoWayCalendar(session)
+            twoWayNext(session)
             return
         }
         let name = session.checkDatabases.removeFirst()
@@ -1342,66 +1363,74 @@ final class AppState {
     /// Liest den Kalender des Palms, plant den Abgleich gegen den Spiegel
     /// und schreibt den Plan ins Log - nichts wird geschrieben. Dann die
     /// Zeitzonen.
-    private func twoWayCalendar(_ session: Session) {
-        guard session.twoWayCalendar, let tabId = session.tabId, let user = session.user else {
+    private func twoWayNext(_ session: Session) {
+        guard !session.twoWayDatabases.isEmpty, let tabId = session.tabId, let user = session.user else {
+            session.twoWayCurrent = nil
             fixLocations(session)
             return
         }
-        session.twoWayCalendar = false
+        let name = session.twoWayDatabases.removeFirst()
+        session.twoWayCurrent = name
         session.calendarAppInfo = nil
         session.calendarRecords = []
+        session.twoWayInstall = nil
+        session.twoWayMirrorSave = nil
         session.stage = .twoWayCalendar
-        statuses[tabId]?.phase = .readingCalendar(user: user, database: CalendarBuilder.databaseName, done: 0)
-        tabLog(tabId, L10n.logTwoWayReading)
-        session.runner.send("opendb r \(CalendarBuilder.databaseName)")
+        statuses[tabId]?.phase = .readingCalendar(user: user, database: name, done: 0)
+        tabLog(tabId, L10n.logTwoWayReading(twoWayName(name)))
+        session.runner.send("opendb r \(name)")
     }
 
-    private func mirrorURL(for profile: DeviceProfile) -> URL {
-        deviceManager.profileDirectory(for: profile).appendingPathComponent("Sync").appendingPathComponent("calendar-mirror.json")
-    }
-
-    /// Der Kalender ist gelesen: Mac-Seite holen, planen, berichten.
-    private func twoWayPlanned(_ session: Session) {
-        guard let tabId = session.tabId, let profileId = session.profileId,
-              let profile = deviceManager.profile(profileId), let settings = profile.calendarSync else { return }
-        let url = mirrorURL(for: profile)
-        let mirror = (try? CalendarMirror.load(from: url)) ?? CalendarMirror(pcID: CalendarMirror.newPCID())
-        let fast = mirror.lastSync != nil && session.lastSyncPC == mirror.pcID
-        tabLog(tabId, L10n.logTwoWayMode(fast: fast, lastSyncPC: session.lastSyncPC, mirrorEntries: mirror.entries.count))
-
-        let categories = session.calendarAppInfo.flatMap { try? CalendarAppInfo(data: $0) }?.categories.names ?? ["Unfiled"]
-        let palm = PalmSnapshot.all(session.calendarRecords)   // der Probelauf liest immer alles
-
-        guard calendarSource.hasAccess else {
-            tabLog(tabId, L10n.logCalendarNoAccess)
-            return
+    private func twoWayName(_ database: String) -> String {
+        switch database {
+        case ContactsBuilder.databaseName: return L10n.twoWayContacts
+        case TasksBuilder.databaseName: return L10n.twoWayTasks
+        default: return L10n.twoWayCalendar
         }
-        let calendar = Foundation.Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let windowStart = calendar.date(byAdding: .day, value: -settings.daysBack, to: today)!
-        let windowEnd = calendar.date(byAdding: .day, value: settings.daysAhead, to: today)!
-        let events = calendarSource.events(from: windowStart, to: windowEnd, calendarIDs: settings.calendars.map(\.id))
-        let builder = CalendarBuilder(options: .init(homeZone: .current, windowStart: windowStart, windowEnd: windowEnd,
-                                                     calendars: settings.macCalendars,
-                                                     startOfWeek: calendar.firstWeekday == 2 ? 1 : 0))
-        let items = builder.items(events).items
-        let engine = CalendarSyncEngine(windowStart: PalmDate(windowStart, in: calendar), windowEnd: PalmDate(windowEnd, in: calendar),
-                                        conflictPolicy: settings.conflicts)
+    }
+
+    private func mirrorURL(_ file: String, for profile: DeviceProfile) -> URL {
+        deviceManager.profileDirectory(for: profile).appendingPathComponent("Sync").appendingPathComponent(file)
+    }
+
+    /// Die Datenbank ist gelesen: Mac-Seite holen, planen, berichten, anwenden.
+    private func twoWayPlanned(_ session: Session) {
+        guard let profileId = session.profileId, let profile = deviceManager.profile(profileId) else { return }
+        switch session.twoWayCurrent {
+        case ContactsBuilder.databaseName: twoWayContacts(session, profile: profile)
+        case TasksBuilder.databaseName: twoWayTasks(session, profile: profile)
+        default: twoWayCalendar(session, profile: profile)
+        }
+    }
+
+    /// Was alle drei gemeinsam haben: Spiegel laden, planen, ins Log, und
+    /// außer im Probelauf die Mac-Seite schreiben und die zusammengeführte
+    /// Datenbank zum Installieren bereitlegen.
+    private func twoWayRun<Item: SyncedItem>(
+        _ session: Session, profile: DeviceProfile, what: String, mirrorFile: String, engine: SyncEngine<Item>,
+        palmCategories: [String], mac: [MacSyncItem<Item>],
+        titleOf: (Data) -> String?,
+        applyMac: (SyncPlan<Item>) -> (createdKeys: [Int: MacKey], updated: Int, deleted: Int, failures: [String]),
+        palmDatabase: (SyncPlan<Item>) -> (database: PalmDatabase, palmIDs: [Int: UInt32])
+    ) {
+        guard let tabId = session.tabId else { return }
+        let url = mirrorURL(mirrorFile, for: profile)
+        let mirror = (try? SyncMirror<Item>.load(from: url)) ?? SyncMirror<Item>(pcID: SyncMirror<Item>.newPCID())
+        let fast = mirror.lastSync != nil && session.lastSyncPC == mirror.pcID
+        tabLog(tabId, L10n.logTwoWayMode(what, fast: fast, lastSyncPC: session.lastSyncPC, mirrorEntries: mirror.entries.count))
+        let palm = PalmSnapshot.all(session.calendarRecords)   // es wird immer alles gelesen
         do {
-            let plan = try engine.plan(palm: palm, palmCategories: categories, mac: items, mirror: mirror)
-            tabLog(tabId, L10n.logTwoWaySummary(toPalm: plan.palmWrites.count, palmDeletes: plan.palmDeletes.count,
+            let plan = try engine.plan(palm: palm, palmCategories: palmCategories, mac: mac, mirror: mirror)
+            tabLog(tabId, L10n.logTwoWaySummary(what, toPalm: plan.palmWrites.count, palmDeletes: plan.palmDeletes.count,
                                                 toMac: plan.macCreates.count + plan.macUpdates.count, macDeletes: plan.macDeletes.count,
-                                                conflicts: plan.conflicts.count, policy: settings.conflicts))
+                                                conflicts: plan.conflicts.count, policy: engine.conflictPolicy))
             var lines: [String] = []
-            for w in plan.palmWrites.prefix(10) {
-                let title = (try? CalendarEvent(data: w.record))?.title ?? "?"
-                lines.append(L10n.logTwoWayToPalm(title, new: w.id == nil))
-            }
+            for w in plan.palmWrites.prefix(10) { lines.append(L10n.logTwoWayToPalm(titleOf(w.record) ?? "?", new: w.id == nil)) }
             for c in plan.macCreates.prefix(10) { lines.append(L10n.logTwoWayToMac(c.item.title ?? "?", new: true)) }
             for c in plan.macUpdates.prefix(10) { lines.append(L10n.logTwoWayToMac(c.item.title ?? "?", new: false)) }
             for conflict in plan.conflicts.prefix(10) {
                 lines.append(L10n.logTwoWayConflict(conflict.title, conflict.field, conflict.palmValue, conflict.macValue,
-                                                    policy: settings.conflicts))
+                                                    policy: engine.conflictPolicy))
             }
             for line in lines { tabLog(tabId, "  " + line) }
             for line in plan.log.prefix(10) { tabLog(tabId, "  " + line) }
@@ -1411,57 +1440,151 @@ final class AppState {
                 tabLog(tabId, L10n.logTwoWayDryRunDone)
                 return
             }
-            twoWayApply(plan, mirror: mirror, session: session, profile: profile, settings: settings,
-                        palmCategories: session.calendarAppInfo.flatMap { try? CalendarAppInfo(data: $0) }?.categories ?? CategoryAppInfo(),
-                        startOfWeek: calendar.firstWeekday == 2 ? 1 : 0)
+            let result = applyMac(plan)
+            tabLog(tabId, L10n.logTwoWayMacApplied(result.createdKeys.count, result.updated, result.deleted))
+            for failure in result.failures.prefix(10) { tabLog(tabId, L10n.logTwoWayMacFailure(failure)) }
+
+            let (db, palmIDs) = palmDatabase(plan)
+            let after = plan.mirror(after: mirror, palmIDs: palmIDs, macKeys: result.createdKeys)
+            let dbURL = mirrorURL("\(db.name).pdb", for: profile)
+            try FileManager.default.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try db.encode().write(to: dbURL, options: .atomic)
+            session.twoWayInstall = dbURL
+            session.twoWayPCID = after.pcID
+            session.twoWayMirrorSave = { try after.save(to: url); return after.entries.count }
+            tabLog(tabId, L10n.logTwoWayPalmInstalling(what, db.records.count))
         } catch {
             tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
+            session.twoWayInstall = nil
+            session.twoWayMirrorSave = nil
         }
     }
 
-    /// Anwenden: die Mac-Seite über EventKit, der Palm bekommt den
-    /// zusammengeführten Kalender als Ganzes (nach dem Schließen installiert),
-    /// danach Spiegel speichern und lastSyncPC setzen.
-    private func twoWayApply(_ plan: CalendarSyncPlan, mirror: CalendarMirror, session: Session, profile: DeviceProfile,
-                             settings: CalendarSyncSettings, palmCategories: CategoryAppInfo, startOfWeek: UInt8) {
-        guard let tabId = session.tabId else { return }
+    private func twoWayCalendar(_ session: Session, profile: DeviceProfile) {
+        guard let tabId = session.tabId, let settings = profile.calendarSync else { return }
+        guard calendarSource.hasAccess else {
+            tabLog(tabId, L10n.logCalendarNoAccess)
+            return
+        }
+        let appInfo = session.calendarAppInfo.flatMap { try? CalendarAppInfo(data: $0) }
+        let calendar = Foundation.Calendar.current
+        let startOfWeek: UInt8 = calendar.firstWeekday == 2 ? 1 : 0
+        let today = calendar.startOfDay(for: Date())
+        let windowStart = calendar.date(byAdding: .day, value: -settings.daysBack, to: today)!
+        let windowEnd = calendar.date(byAdding: .day, value: settings.daysAhead, to: today)!
+        let events = calendarSource.events(from: windowStart, to: windowEnd, calendarIDs: settings.calendars.map(\.id))
+        let builder = CalendarBuilder(options: .init(homeZone: .current, windowStart: windowStart, windowEnd: windowEnd,
+                                                     calendars: settings.macCalendars, startOfWeek: startOfWeek))
+        let (start, end) = (PalmDate(windowStart, in: calendar), PalmDate(windowEnd, in: calendar))
+        let engine = SyncEngine<SyncedEvent>(conflictPolicy: settings.conflicts) { $0.date >= start && $0.date <= end }
+        let mac = builder.items(events).items.map {
+            MacSyncItem(key: $0.key, item: SyncedEvent($0.event, category: $0.category), macOwned: $0.macOwned,
+                        palmRecord: $0.event.encode())
+        }
         let calendars = settings.calendars
         let writer = CalendarWriter(store: calendarSource.store, homeZone: .current) { category in
             let id = calendars.first { ($0.category ?? $0.title) == category }?.id ?? calendars.first?.id
             return id.flatMap { self.calendarSource.store.calendar(withIdentifier: $0) }
         }
-        let result = writer.apply(plan)
-        tabLog(tabId, L10n.logTwoWayMacApplied(result.createdKeys.count, result.updated, result.deleted))
-        for failure in result.failures.prefix(10) { tabLog(tabId, L10n.logTwoWayMacFailure(failure)) }
+        twoWayRun(session, profile: profile, what: L10n.twoWayCalendar, mirrorFile: "calendar-mirror.json", engine: engine,
+                  palmCategories: appInfo?.categories.names ?? ["Unfiled"], mac: mac,
+                  titleOf: { (try? CalendarEvent(data: $0))?.title },
+                  applyMac: { plan in
+                      let r = writer.apply(plan)
+                      return (r.createdKeys, r.updated, r.deleted, r.failures)
+                  },
+                  palmDatabase: { plan in
+                      let (db, ids, _) = plan.palmDatabase(categories: appInfo?.categories ?? CategoryAppInfo(), startOfWeek: startOfWeek)
+                      return (db, ids)
+                  })
+    }
 
-        let (db, palmIDs, _) = plan.palmDatabase(categories: palmCategories, startOfWeek: startOfWeek)
-        session.twoWayMirror = plan.mirror(after: mirror, palmIDs: palmIDs, macKeys: result.createdKeys)
-        let url = deviceManager.profileDirectory(for: profile).appendingPathComponent("Sync")
-            .appendingPathComponent("\(CalendarBuilder.databaseName).pdb")
-        do {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try db.encode().write(to: url, options: .atomic)
-            session.twoWayInstall = url
-            tabLog(tabId, L10n.logTwoWayPalmInstalling(db.records.count))
-        } catch {
-            tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
-            session.twoWayMirror = nil
+    private func twoWayContacts(_ session: Session, profile: DeviceProfile) {
+        guard let tabId = session.tabId, let settings = profile.contactSync else { return }
+        guard contactSource.hasAccess else {
+            tabLog(tabId, L10n.logContactsNoAccess)
+            return
+        }
+        guard let appInfoData = session.calendarAppInfo, let appInfo = try? ContactAppInfo(data: appInfoData) else {
+            tabLog(tabId, L10n.logTwoWayFailed("ContactsDB-PAdd: AppInfo"))
+            return
+        }
+        let containers = settings.containers.map(\.id)
+        let macContacts: [MacContact]
+        do { macContacts = try contactSource.contacts(in: containers) } catch {
+            tabLog(tabId, L10n.logContactsFailed(error.localizedDescription))
+            return
+        }
+        let builder = ContactsBuilder(options: .init(containers: settings.containers.map { .init(id: $0.id, title: $0.title) }))
+        let engine = SyncEngine<SyncedContact>(conflictPolicy: settings.conflicts)
+        let writer = ContactWriter(store: contactSource.store, containerIDs: containers)
+        twoWayRun(session, profile: profile, what: L10n.twoWayContacts, mirrorFile: "contacts-mirror.json", engine: engine,
+                  palmCategories: appInfo.categories.names, mac: builder.syncItems(macContacts),
+                  titleOf: { (try? Contact(data: $0)).map { SyncedContact($0, category: "").title ?? "" } },
+                  applyMac: { plan in
+                      let r = writer.apply(plan)
+                      return (r.createdKeys, r.updated, r.deleted, r.failures)
+                  },
+                  palmDatabase: { plan in
+                      let (db, ids, _) = plan.palmDatabase(appInfo: appInfo)
+                      return (db, ids)
+                  })
+    }
+
+    private func twoWayTasks(_ session: Session, profile: DeviceProfile) {
+        guard let tabId = session.tabId, let settings = profile.taskSync else { return }
+        guard reminderSource.hasAccess else {
+            tabLog(tabId, L10n.logTasksNoAccess)
+            return
+        }
+        guard let appInfoData = session.calendarAppInfo, let appInfo = try? TaskAppInfo(data: appInfoData) else {
+            tabLog(tabId, L10n.logTwoWayFailed("TasksDB-PTod: AppInfo"))
+            return
+        }
+        // Reminders liefert asynchron; der Palm wartet solange (Lebenszeichen)
+        Task { @MainActor [weak self, weak session] in
+            guard let self, let session else { return }
+            var calendar = Foundation.Calendar(identifier: .gregorian)
+            calendar.timeZone = .current
+            let today = PalmDate(Date(), in: calendar)
+            let startOfWeek: UInt8 = Foundation.Calendar.current.firstWeekday == 2 ? 1 : 0
+            let reminders = await self.reminderSource.reminders(in: settings.lists.map(\.id))
+            let builder = TasksBuilder(options: .init(lists: settings.lists.map { .init(id: $0.id, title: $0.title) },
+                                                      keepCompletedDays: settings.keepCompletedDays, today: today,
+                                                      startOfWeek: startOfWeek))
+            let engine = SyncEngine<SyncedTask>(conflictPolicy: settings.conflicts, inWindow: builder.inWindow)
+            let lists = settings.lists
+            let writer = TaskWriter(store: self.reminderSource.store, homeZone: .current, today: today, startOfWeek: startOfWeek) { category in
+                let id = lists.first { $0.title == category }?.id ?? lists.first?.id
+                return id.flatMap { self.reminderSource.store.calendar(withIdentifier: $0) }
+            }
+            self.twoWayRun(session, profile: profile, what: L10n.twoWayTasks, mirrorFile: "tasks-mirror.json", engine: engine,
+                           palmCategories: appInfo.categories.names, mac: builder.syncItems(reminders),
+                           titleOf: { (try? PalmTask(data: $0))?.title },
+                           applyMac: { plan in
+                               let r = writer.apply(plan)
+                               return (r.createdKeys, r.updated, r.deleted, r.failures)
+                           },
+                           palmDatabase: { plan in
+                               let (db, ids, _) = plan.palmDatabase(appInfo: appInfo)
+                               return (db, ids)
+                           })
+            session.runner.send("closedb")
         }
     }
 
-    /// Der zusammengeführte Kalender ist auf dem Palm: Spiegel speichern,
+    /// Die zusammengeführte Datenbank ist auf dem Palm: Spiegel speichern,
     /// diesen Mac als letzten PC eintragen.
     private func twoWayInstalled(_ session: Session) {
-        guard let tabId = session.tabId, let profileId = session.profileId, let profile = deviceManager.profile(profileId),
-              let mirror = session.twoWayMirror else { return }
+        guard let tabId = session.tabId, let save = session.twoWayMirrorSave else { return }
+        session.twoWayMirrorSave = nil
         do {
-            try mirror.save(to: mirrorURL(for: profile))
-            tabLog(tabId, L10n.logTwoWayMirrorSaved(mirror.entries.count))
+            let entries = try save()
+            tabLog(tabId, L10n.logTwoWayMirrorSaved(entries))
         } catch {
             tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
         }
-        session.twoWayMirror = nil
-        session.runner.send("syncinfo \(mirror.pcID)")
+        session.runner.send("syncinfo \(session.twoWayPCID)")
     }
 
     /// Die Ortsdatenbanken des Palms (eingebaute und eigene Orte) mit der
