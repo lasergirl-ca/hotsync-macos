@@ -1,5 +1,6 @@
 import Foundation
 import HotSyncCore
+import PalmSync
 import Observation
 
 enum Language: String, CaseIterable {
@@ -549,9 +550,21 @@ enum L10n {
         fast ? "Probelauf: schneller Abgleich möglich (Spiegel mit \(mirrorEntries) Einträgen, letzter PC passt)" : "Probelauf: langsamer Abgleich (Spiegel: \(mirrorEntries) Einträge, letzter PC \(lastSyncPC)); Datensätze werden nach Inhalt gepaart",
         fast ? "Dry run: a fast sync would do (mirror with \(mirrorEntries) entries, last PC matches)" : "Dry run: slow sync (mirror: \(mirrorEntries) entries, last PC \(lastSyncPC)); records are paired by content"
     ) }
-    static func logTwoWaySummary(toPalm: Int, palmDeletes: Int, toMac: Int, macDeletes: Int, conflicts: Int) -> String { s(
-        "Probelauf: \(toPalm) auf den Palm, \(palmDeletes) dort löschen; \(toMac) auf den Mac, \(macDeletes) dort löschen; \(conflicts) Konflikte (der Mac gewinnt)",
-        "Dry run: \(toPalm) to the Palm, \(palmDeletes) deleted there; \(toMac) to the Mac, \(macDeletes) deleted there; \(conflicts) conflicts (the Mac wins)"
+    static func logTwoWaySummary(toPalm: Int, palmDeletes: Int, toMac: Int, macDeletes: Int, conflicts: Int, policy: ConflictPolicy) -> String { s(
+        "Probelauf: \(toPalm) auf den Palm, \(palmDeletes) dort löschen; \(toMac) auf den Mac, \(macDeletes) dort löschen; \(conflicts) Konflikte (\(conflictPolicyName(policy)))",
+        "Dry run: \(toPalm) to the Palm, \(palmDeletes) deleted there; \(toMac) to the Mac, \(macDeletes) deleted there; \(conflicts) conflicts (\(conflictPolicyName(policy)))"
+    ) }
+    static var conflictPolicyLabel: String { s("Bei Konflikten:", "On conflicts:") }
+    static func conflictPolicyName(_ p: ConflictPolicy) -> String {
+        switch p {
+        case .macWins: return s("Mac gewinnt", "Mac wins")
+        case .palmWins: return s("Palm gewinnt", "Palm wins")
+        case .keepBoth: return s("beide behalten", "keep both")
+        }
+    }
+    static var conflictPolicyHelp: String { s(
+        "Wenn beide Seiten dasselbe Feld desselben Termins verschieden geändert haben. „Beide behalten“ legt die Palm-Fassung als zweiten Termin auf beiden Seiten an, wie der Palm Desktop.",
+        "When both sides changed the same field of the same event differently. “Keep both” makes the Palm's version a second event on both sides, as the Palm Desktop did."
     ) }
     static func logTwoWayToPalm(_ title: String, new: Bool) -> String { s(
         new ? "→ Palm (neu): \(title)" : "→ Palm: \(title)", new ? "→ Palm (new): \(title)" : "→ Palm: \(title)"
@@ -559,9 +572,9 @@ enum L10n {
     static func logTwoWayToMac(_ title: String, new: Bool) -> String { s(
         new ? "→ Mac (neu): \(title)" : "→ Mac: \(title)", new ? "→ Mac (new): \(title)" : "→ Mac: \(title)"
     ) }
-    static func logTwoWayConflict(_ title: String, _ field: String, _ palm: String, _ mac: String) -> String { s(
-        "Konflikt \(title) · \(field): Palm „\(palm)“, Mac „\(mac)“ – Mac gewinnt",
-        "Conflict \(title) · \(field): Palm “\(palm)”, Mac “\(mac)” – Mac wins"
+    static func logTwoWayConflict(_ title: String, _ field: String, _ palm: String, _ mac: String, policy: ConflictPolicy) -> String { s(
+        "Konflikt \(title) · \(field): Palm „\(palm)“, Mac „\(mac)“ – \(conflictPolicyName(policy))",
+        "Conflict \(title) · \(field): Palm “\(palm)”, Mac “\(mac)” – \(conflictPolicyName(policy))"
     ) }
     static func logTwoWayMissingCategories(_ names: [String]) -> String { s(
         "Kategorien, die der Palm noch nicht hat: \(names.joined(separator: ", "))",

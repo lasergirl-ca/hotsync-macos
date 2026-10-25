@@ -121,13 +121,19 @@ public struct CalendarSyncSettings: Codable, Equatable, Sendable {
     public var calendars: [Choice]
     public var daysBack: Int
     public var daysAhead: Int
+    /// nil (profiles from before the setting): the Mac wins
+    public var conflictPolicy: ConflictPolicy?
 
-    public init(enabled: Bool = false, calendars: [Choice] = [], daysBack: Int = 90, daysAhead: Int = 365) {
+    public init(enabled: Bool = false, calendars: [Choice] = [], daysBack: Int = 90, daysAhead: Int = 365,
+                conflictPolicy: ConflictPolicy? = nil) {
         self.enabled = enabled
         self.calendars = calendars
         self.daysBack = daysBack
         self.daysAhead = daysAhead
+        self.conflictPolicy = conflictPolicy
     }
+
+    public var conflicts: ConflictPolicy { conflictPolicy ?? .macWins }
 
     public var macCalendars: [CalendarBuilder.MacCalendar] {
         calendars.map { .init(id: $0.id, title: $0.title, category: $0.category?.isEmpty == false ? $0.category : nil) }

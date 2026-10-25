@@ -26,6 +26,18 @@ public enum PalmSnapshot: Equatable, Sendable {
     case modified([PalmRecordIn])
 }
 
+/// What happens when both sides changed the same field of the same item
+/// to different values; the Palm Desktop conduits had the same three.
+public enum ConflictPolicy: String, Codable, CaseIterable, Sendable {
+    /// the Mac's value, the Palm's goes to the log
+    case macWins
+    /// the Palm's value, the Mac's goes to the log
+    case palmWins
+    /// the Mac's value in the item, and the Palm's version becomes a second
+    /// item on both sides, as the Palm Desktop did; nothing is lost
+    case keepBoth
+}
+
 public struct SyncConflict: Equatable, Sendable {
     public var palmID: UInt32?
     public var mac: MacKey?
@@ -102,8 +114,8 @@ public enum SyncError: Error, Equatable {
 /// as the common ancestor. Rules:
 ///
 /// - Only one side changed a field: that value wins. Both changed it to
-///   different values: the Mac wins and the Palm's value goes to the
-///   conflict log; nothing is written into the Mac's data for it.
+///   different values: the `conflictPolicy` decides (Mac wins, Palm wins,
+///   keep both), the losing value goes to the conflict log.
 /// - Deleted on one side, unchanged on the other: deleted on both. Deleted
 ///   on one side, edited on the other: the edit wins and the item comes
 ///   back on the side that deleted it.
@@ -117,10 +129,12 @@ public enum SyncError: Error, Equatable {
 public struct CalendarSyncEngine {
     public var windowStart: PalmDate
     public var windowEnd: PalmDate
+    public var conflictPolicy: ConflictPolicy
 
-    public init(windowStart: PalmDate, windowEnd: PalmDate) {
+    public init(windowStart: PalmDate, windowEnd: PalmDate, conflictPolicy: ConflictPolicy = .macWins) {
         self.windowStart = windowStart
         self.windowEnd = windowEnd
+        self.conflictPolicy = conflictPolicy
     }
 
     public func plan(palm snapshot: PalmSnapshot, palmCategories: [String], mac items: [CalendarBuilder.MacItem],
@@ -259,8 +273,15 @@ public struct CalendarSyncEngine {
                     writePalm(macEvent, id: entry.palmID, over: palmBytes, mac: entry.mac, macOwned: true)
                     break
                 }
+                let before = plan.conflicts.count
                 let merged = Self.merge(base: base, palm: palmEvent, mac: macEvent, palmID: entry.palmID, mac: entry.mac,
-                                        conflicts: &plan.conflicts)
+                                        policy: conflictPolicy, conflicts: &plan.conflicts)
+                if conflictPolicy == .keepBoth && plan.conflicts.count > before {
+                    // the Palm's version lives on as a second item on both sides
+                    plan.log.append("\(palmEvent.title ?? "?"): conflict, the Palm's version is kept as a second item")
+                    writePalm(palmEvent, id: nil, over: palmBytes, mac: nil, macOwned: false)
+                    plan.macCreates.append(.init(key: nil, event: palmEvent, entry: plan.entries.count - 1))
+                }
                 if merged != palmEvent {
                     writePalm(merged, id: entry.palmID, over: palmBytes, mac: entry.mac, macOwned: false)
                 } else {
@@ -294,7 +315,7 @@ public struct CalendarSyncEngine {
                     // no common ancestor: the Palm's version stands in for it,
                     // so every difference is a Mac change
                     let merged = Self.merge(base: palmVersion, palm: palmVersion, mac: candidate, palmID: record.id, mac: item.key,
-                                            conflicts: &plan.conflicts)
+                                            policy: conflictPolicy, conflicts: &plan.conflicts)
                     if merged != palmVersion {
                         writePalm(merged, id: record.id, over: record.data, mac: item.key, macOwned: item.macOwned)
                     } else {
@@ -321,9 +342,10 @@ public struct CalendarSyncEngine {
         return plan
     }
 
-    /// Field by field against the base; the Mac wins a field both changed.
+    /// Field by field against the base; a field both changed goes to the
+    /// policy's side (keep both: the Mac's, the caller duplicates the item).
     static func merge(base: SyncedEvent, palm: SyncedEvent, mac: SyncedEvent, palmID: UInt32?, mac key: MacKey?,
-                      conflicts: inout [SyncConflict]) -> SyncedEvent {
+                      policy: ConflictPolicy = .macWins, conflicts: inout [SyncConflict]) -> SyncedEvent {
         var merged = base
         for field in SyncedEvent.Field.allCases {
             let palmChanged = palm.differs(from: base, in: field)
@@ -333,7 +355,7 @@ public struct CalendarSyncEngine {
             case (true, false): merged.set(field, from: palm)
             case (false, true): merged.set(field, from: mac)
             case (true, true):
-                merged.set(field, from: mac)
+                merged.set(field, from: policy == .palmWins ? palm : mac)
                 if palm.differs(from: mac, in: field) {
                     conflicts.append(SyncConflict(palmID: palmID, mac: key, title: mac.title ?? palm.title ?? "",
                                                   field: field, palmValue: palm.describe(field), macValue: mac.describe(field)))

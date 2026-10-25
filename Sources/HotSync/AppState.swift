@@ -1375,12 +1375,13 @@ final class AppState {
                                                      calendars: settings.macCalendars,
                                                      startOfWeek: calendar.firstWeekday == 2 ? 1 : 0))
         let items = builder.items(events).items
-        let engine = CalendarSyncEngine(windowStart: PalmDate(windowStart, in: calendar), windowEnd: PalmDate(windowEnd, in: calendar))
+        let engine = CalendarSyncEngine(windowStart: PalmDate(windowStart, in: calendar), windowEnd: PalmDate(windowEnd, in: calendar),
+                                        conflictPolicy: settings.conflicts)
         do {
             let plan = try engine.plan(palm: palm, palmCategories: categories, mac: items, mirror: mirror)
             tabLog(tabId, L10n.logTwoWaySummary(toPalm: plan.palmWrites.count, palmDeletes: plan.palmDeletes.count,
                                                 toMac: plan.macCreates.count + plan.macUpdates.count, macDeletes: plan.macDeletes.count,
-                                                conflicts: plan.conflicts.count))
+                                                conflicts: plan.conflicts.count, policy: settings.conflicts))
             var lines: [String] = []
             for w in plan.palmWrites.prefix(10) {
                 let title = (try? CalendarEvent(data: w.record))?.title ?? "?"
@@ -1389,7 +1390,8 @@ final class AppState {
             for c in plan.macCreates.prefix(10) { lines.append(L10n.logTwoWayToMac(c.event.title ?? "?", new: true)) }
             for c in plan.macUpdates.prefix(10) { lines.append(L10n.logTwoWayToMac(c.event.title ?? "?", new: false)) }
             for conflict in plan.conflicts.prefix(10) {
-                lines.append(L10n.logTwoWayConflict(conflict.title, conflict.field.rawValue, conflict.palmValue, conflict.macValue))
+                lines.append(L10n.logTwoWayConflict(conflict.title, conflict.field.rawValue, conflict.palmValue, conflict.macValue,
+                                                    policy: settings.conflicts))
             }
             for line in lines { tabLog(tabId, "  " + line) }
             for line in plan.log.prefix(10) { tabLog(tabId, "  " + line) }

@@ -286,3 +286,37 @@ private func syncedMirror() -> SyncMirror {
     #expect(categories.names[2] == "Family")
     #expect(db.records[0].category == 2)
 }
+
+// MARK: - Conflict policy
+
+@Test func palmWinsPolicyKeepsThePalmsValue() throws {
+    var palmFirst = engine
+    palmFirst.conflictPolicy = .palmWins
+    let palmEdit = palmRecord(id: 0x1001, "Standup (Palm)", standupDate, attributes: 0x40)
+    let plan = try palmFirst.plan(palm: .modified([palmEdit]), palmCategories: palmCategories,
+                                  mac: items([macEvent("Standup (Mac)", standupStart, series: "Standup")]), mirror: syncedMirror())
+    #expect(plan.conflicts.count == 1)
+    #expect(plan.palmWrites.isEmpty)   // the Palm already has the winning value
+    #expect(plan.macUpdates.count == 1 && plan.macUpdates[0].event.title == "Standup (Palm)")
+    #expect(plan.entries[0].event.title == "Standup (Palm)")
+}
+
+@Test func keepBothPolicyDuplicatesThePalmsVersion() throws {
+    var both = engine
+    both.conflictPolicy = .keepBoth
+    let palmEdit = palmRecord(id: 0x1001, "Standup (Palm)", standupDate, attributes: 0x40)
+    let plan = try both.plan(palm: .modified([palmEdit]), palmCategories: palmCategories,
+                             mac: items([macEvent("Standup (Mac)", standupStart, series: "Standup")]), mirror: syncedMirror())
+    #expect(plan.conflicts.count == 1)
+    // the paired item takes the Mac's value …
+    #expect(plan.entries.contains { $0.palmID == 0x1001 && $0.event.title == "Standup (Mac)" })
+    // … and the Palm's version becomes a new item on both sides
+    let copy = try #require(plan.entries.firstIndex { $0.palmID == nil && $0.mac == nil })
+    #expect(plan.entries[copy].event.title == "Standup (Palm)")
+    #expect(plan.palmWrites.contains { $0.entry == copy && $0.id == nil })
+    #expect(plan.macCreates.contains { $0.entry == copy })
+    #expect(plan.log.contains { $0.contains("kept as a second item") })
+    // both IDs filled in, the mirror knows the copy
+    let mirror = plan.mirror(after: syncedMirror(), palmIDs: [copy: 0x1002], macKeys: [copy: MacKey(seriesID: "copy")])
+    #expect(mirror.entries.count == 2)
+}

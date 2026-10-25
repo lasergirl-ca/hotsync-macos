@@ -1,4 +1,5 @@
 import EventKit
+import PalmSync
 import PalmSyncMac
 import SwiftUI
 
@@ -54,6 +55,15 @@ struct CalendarSyncSection: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     if appState.deviceManager.profile(profileId)?.isCalendarTwoWayDryRun == true {
+                        Picker(selection: Binding(get: { settings.conflicts }, set: { v in update { $0.conflictPolicy = v } })) {
+                            ForEach(ConflictPolicy.allCases, id: \.self) { Text(L10n.conflictPolicyName($0)).tag($0) }
+                        } label: {
+                            Text(L10n.conflictPolicyLabel)
+                        }
+                        .pickerStyle(.menu)
+                        .font(.caption)
+                        .fixedSize()
+                        .help(L10n.conflictPolicyHelp)
                         Toggle(isOn: Binding(
                             get: { appState.deviceManager.profile(profileId)?.isCalendarTwoWayApply ?? false },
                             set: { appState.setCalendarTwoWayApply($0, for: profileId) }
