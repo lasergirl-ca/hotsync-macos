@@ -27,6 +27,7 @@ struct TabDetailView: View {
                             resultBox(status)
                         }
                     }
+                    DryRunSection(profileId: tab.profileId)
                     CalendarSyncSection(profileId: tab.profileId)
                     ContactSyncSection(profileId: tab.profileId)
                     TaskSyncSection(profileId: tab.profileId)
@@ -735,6 +736,35 @@ struct SyncLogo: View {
         .frame(width: 40, height: 40)
         .onAppear { spinning = isSyncing }
         .onChange(of: isSyncing) { _, now in spinning = now }
+    }
+}
+
+/// Probelauf für alle Abgleiche eines Profils: ein Schalter über den
+/// Abschnitten, damit er nicht übersehen wird.
+struct DryRunSection: View {
+    @Environment(AppState.self) var appState
+    let profileId: UUID
+
+    var body: some View {
+        let on = appState.deviceManager.profile(profileId)?.isDryRun ?? false
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle(isOn: Binding(
+                    get: { appState.deviceManager.profile(profileId)?.isDryRun ?? false },
+                    set: { appState.setDryRun($0, for: profileId) }
+                )) {
+                    Text(L10n.dryRunToggle)
+                }
+                Text(L10n.dryRunHint)
+                    .font(.caption)
+                    .foregroundStyle(on ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(4)
+        } label: {
+            Label(L10n.dryRunTitle, systemImage: "eye")
+        }
     }
 }
 

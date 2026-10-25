@@ -942,16 +942,15 @@ final class AppState {
         refreshContactPreview(for: profileId)
     }
 
-    func setCalendarTwoWayDryRun(_ on: Bool, for profileId: UUID) {
+    func setDryRun(_ on: Bool, for profileId: UUID) {
         guard var profile = deviceManager.profile(profileId) else { return }
-        profile.calendarTwoWayDryRun = on
-        if !on { profile.calendarTwoWayApply = false }
+        profile.dryRun = on
         deviceManager.updateProfile(profile)
     }
 
-    func setCalendarTwoWayApply(_ on: Bool, for profileId: UUID) {
+    func setCalendarTwoWay(_ on: Bool, for profileId: UUID) {
         guard var profile = deviceManager.profile(profileId) else { return }
-        profile.calendarTwoWayApply = on
+        profile.calendarTwoWay = on
         deviceManager.updateProfile(profile)
     }
 
@@ -1112,42 +1111,44 @@ final class AppState {
 
         let mode = tabStore.tab(tabId)?.hotSyncMode ?? .syncInstallBackup
         if mode.syncs, let profile = deviceManager.profile(profileId) {
+            let dry = profile.isDryRun
+            if dry { tabLog(tabId, L10n.logDryRun) }
             // Uhr vom Mac jetzt, Zeitzonen nach der Sicherung
-            if profile.isClockSyncOn { session.runner.send("settime") }
+            if profile.isClockSyncOn {
+                if dry { tabLog(tabId, L10n.logDryRunClock) } else { session.runner.send("settime") }
+            }
             if profile.isZoneSyncOn { session.fixDatabases = ["locLTimeZoneDB", "locLDefLocationDB", "locLCusLocationDB"] }
-        }
-        if mode.syncs, let profile = deviceManager.profile(profileId) {
             // Erst sichern, dann ersetzen: ohne Sicherung dieses Palms gehen
             // sein eigener Kalender und seine Kontakte nicht verloren
             if let settings = profile.calendarSync, settings.enabled {
-                if profile.isCalendarTwoWayDryRun {
-                    // Probelauf: nichts installieren, nach der Sicherung planen
+                if profile.isCalendarTwoWay {
+                    // nach der Sicherung: Palm lesen, zusammenführen, dann schreiben
                     session.twoWayCalendar = true
-                    tabLog(tabId, L10n.logTwoWayDryRunPending)
+                    tabLog(tabId, L10n.logTwoWayPending)
                 } else if profile.lastBackupAt == nil {
                     tabLog(tabId, L10n.logCalendarNeedsBackup)
                 } else {
-                    queueCalendar(settings, profileId: profileId, tabId: tabId, queue: queue)
-                    session.checkDatabases.append(CalendarBuilder.databaseName)
+                    queueCalendar(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry)
+                    if !dry { session.checkDatabases.append(CalendarBuilder.databaseName) }
                 }
             }
             if let settings = profile.contactSync, settings.enabled {
                 if profile.lastBackupAt == nil {
                     tabLog(tabId, L10n.logContactsNeedBackup)
                 } else {
-                    queueContacts(settings, profileId: profileId, tabId: tabId, queue: queue)
+                    queueContacts(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry)
                 }
-                session.checkDatabases.append(ContactsBuilder.databaseName)
+                if !dry { session.checkDatabases.append(ContactsBuilder.databaseName) }
             }
             if let settings = profile.taskSync, settings.enabled {
-                session.checkDatabases.append(TasksBuilder.databaseName)
+                if !dry { session.checkDatabases.append(TasksBuilder.databaseName) }
                 if profile.lastBackupAt == nil {
                     tabLog(tabId, L10n.logTasksNeedBackup)
                 } else {
                     // Reminders liefert asynchron; der Palm wartet solange (Lebenszeichen)
                     Task { @MainActor [weak self, weak session] in
                         guard let self, let session else { return }
-                        await self.queueTasks(settings, profileId: profileId, tabId: tabId, queue: queue)
+                        await self.queueTasks(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry)
                         self.startQueue(session, profileId: profileId, tabId: tabId, user: user, queue: queue, mode: mode)
                     }
                     return
@@ -1243,13 +1244,22 @@ final class AppState {
 
     /// Baut CalendarDB-PDat aus Calendar.app und legt es in die Warteschlange,
     /// damit es mit diesem HotSync auf den Palm geht.
-    private func queueCalendar(_ settings: CalendarSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue) {
+    /// Wohin eine gebaute Datenbank kommt: in die Warteschlange, oder beim
+    /// Probelauf daneben nach Sync/DryRun, wo sie niemand installiert.
+    private func syncTarget(_ name: String, for profile: DeviceProfile, dryRun: Bool) throws -> URL {
+        if !dryRun { return deviceManager.installDirectory(for: profile).appendingPathComponent("\(name).pdb") }
+        let dir = deviceManager.profileDirectory(for: profile).appendingPathComponent("Sync").appendingPathComponent("DryRun")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("\(name).pdb")
+    }
+
+    private func queueCalendar(_ settings: CalendarSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue, dryRun: Bool) {
         guard let profile = deviceManager.profile(profileId) else { return }
         do {
             let run = try CalendarSyncRun(settings: settings, source: calendarSource)
-            let url = deviceManager.installDirectory(for: profile)
-                .appendingPathComponent("\(CalendarBuilder.databaseName).pdb")
+            let url = try syncTarget(CalendarBuilder.databaseName, for: profile, dryRun: dryRun)
             let bytes = try run.write(to: url)
+            if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(CalendarBuilder.databaseName, run.report.records, bytes)); return }
             queue.refresh()
             tabLog(tabId, L10n.logCalendarQueued(run.report.records, run.report.seriesMapped, bytes))
             for warning in run.report.warnings { tabLog(tabId, L10n.logCalendarWarning(warning)) }
@@ -1397,7 +1407,7 @@ final class AppState {
             for line in plan.log.prefix(10) { tabLog(tabId, "  " + line) }
             if !plan.missingCategories.isEmpty { tabLog(tabId, L10n.logTwoWayMissingCategories(plan.missingCategories)) }
 
-            guard profile.isCalendarTwoWayApply else {
+            guard !profile.isDryRun else {
                 tabLog(tabId, L10n.logTwoWayDryRunDone)
                 return
             }
@@ -1530,8 +1540,12 @@ final class AppState {
             do {
                 try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try db.encode().write(to: url, options: .atomic)
-                session.fixInstall = url
-                if name == "locLDefLocationDB" { tabLog(tabId, L10n.logLocationsHint) }
+                if profile.isDryRun {
+                    tabLog(tabId, L10n.logDryRunWouldInstall(name, records.count, db.encode().count))
+                } else {
+                    session.fixInstall = url
+                    if name == "locLDefLocationDB" { tabLog(tabId, L10n.logLocationsHint) }
+                }
             } catch {
                 tabLog(tabId, L10n.logLocationsFailed(name, "write", error.localizedDescription))
             }
@@ -1540,13 +1554,13 @@ final class AppState {
     }
 
     /// Baut TasksDB-PTod aus Reminders.app und legt es in die Warteschlange.
-    private func queueTasks(_ settings: TaskSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue) async {
+    private func queueTasks(_ settings: TaskSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue, dryRun: Bool) async {
         guard let profile = deviceManager.profile(profileId) else { return }
         do {
             let run = try await TaskSyncRun(settings: settings, source: reminderSource)
-            let url = deviceManager.installDirectory(for: profile)
-                .appendingPathComponent("\(TasksBuilder.databaseName).pdb")
+            let url = try syncTarget(TasksBuilder.databaseName, for: profile, dryRun: dryRun)
             let bytes = try run.write(to: url)
+            if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(TasksBuilder.databaseName, run.report.records, bytes)); return }
             queue.refresh()
             tabLog(tabId, L10n.logTasksQueued(run.report.records, run.report.completedSkipped, bytes))
             for warning in run.report.warnings { tabLog(tabId, L10n.logTasksWarning(warning)) }
@@ -1558,13 +1572,13 @@ final class AppState {
     }
 
     /// Baut ContactsDB-PAdd aus Contacts.app und legt es in die Warteschlange.
-    private func queueContacts(_ settings: ContactSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue) {
+    private func queueContacts(_ settings: ContactSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue, dryRun: Bool) {
         guard let profile = deviceManager.profile(profileId) else { return }
         do {
             let run = try ContactSyncRun(settings: settings, source: contactSource)
-            let url = deviceManager.installDirectory(for: profile)
-                .appendingPathComponent("\(ContactsBuilder.databaseName).pdb")
+            let url = try syncTarget(ContactsBuilder.databaseName, for: profile, dryRun: dryRun)
             let bytes = try run.write(to: url)
+            if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(ContactsBuilder.databaseName, run.report.records, bytes)); return }
             queue.refresh()
             tabLog(tabId, L10n.logContactsQueued(run.report.records, run.report.categories.count - 1, bytes))
             for warning in run.report.warnings { tabLog(tabId, L10n.logContactsWarning(warning)) }

@@ -485,6 +485,7 @@ enum L10n {
     // MARK: - Kalender-Abgleich
 
     static var calendarSyncTitle: String { s("Kalender: Mac → Palm", "Calendar: Mac → Palm") }
+    static var calendarSyncTitleTwoWay: String { s("Kalender: Mac ↔ Palm", "Calendar: Mac ↔ Palm") }
     static var calendarSyncToggle: String { s("Kalender abgleichen", "Sync Calendar") }
     static var calendarSyncChoose: String { s("Kalender wählen", "Choose calendars") }
     static var calendarSyncWarning: String { s(
@@ -534,25 +535,35 @@ enum L10n {
         "\(name) auf dem Palm: \(records) Datensätze, \(identical) lesbar, \(different) abweichend, \(deleted) gelöscht; Kategorien: \(categories.joined(separator: ", "))",
         "\(name) on the Palm: \(records) records, \(identical) decode, \(different) differ, \(deleted) deleted; categories: \(categories.joined(separator: ", "))"
     ) }
-    static var twoWayDryRunToggle: String { s(
-        "Probelauf in beide Richtungen (nur Log)", "Two-way dry run (log only)"
+    static var dryRunTitle: String { s("Probelauf", "Dry run") }
+    static var dryRunToggle: String { s("Probelauf: nichts schreiben, nur ins Log", "Dry run: write nothing, only log") }
+    static var dryRunHint: String { s(
+        "Gilt für alle Abgleiche dieses Palms: Kalender, Kontakte, Aufgaben, Uhr und Zeitzonen schreiben auf keiner Seite etwas und tragen ins Log ein, was sie tun würden. Die Sicherung läuft; in die Warteschlange gelegte Dateien werden trotzdem installiert.",
+        "Applies to every sync of this Palm: Calendar, Contacts, Tasks, clock and time zones write nothing on either side and log what they would do. The backup still runs; files dropped into the queue are still installed."
     ) }
-    static var twoWayDryRunHint: String { s(
-        "Solange an, wird der Kalender nicht mehr als Ganzes auf den Palm gespielt. Stattdessen liest der HotSync den Kalender des Palms, vergleicht ihn Feld für Feld mit dem Mac und schreibt ins Log, was ein Abgleich in beide Richtungen ändern würde – auf keiner Seite wird etwas geschrieben.",
-        "While on, the calendar is no longer put on the Palm whole. Instead the HotSync reads the Palm's calendar, compares it field by field with the Mac and logs what a two-way sync would change – nothing is written on either side."
+    static var logDryRun: String { s("Probelauf: die Abgleiche schreiben nichts", "Dry run: the syncs write nothing") }
+    static var logDryRunClock: String { s("Probelauf: die Uhr des Palms würde gestellt", "Dry run: the Palm's clock would be set") }
+    static func logDryRunWouldInstall(_ name: String, _ records: Int, _ bytes: Int) -> String { s(
+        "Probelauf: \(name) würde installiert (\(records) Einträge, \(bytes) Bytes), liegt unter Sync/DryRun",
+        "Dry run: \(name) would be installed (\(records) records, \(bytes) bytes), kept under Sync/DryRun"
     ) }
-    static var logTwoWayDryRunPending: String { s(
-        "Kalender: Probelauf in beide Richtungen nach der Sicherung; der Kalender wird nicht installiert",
-        "Calendar: two-way dry run after the backup; the calendar is not installed"
+    static var twoWayToggle: String { s("In beide Richtungen", "Two-way") }
+    static var twoWayHint: String { s(
+        "Der HotSync liest den Kalender des Palms, führt ihn Feld für Feld mit dem Mac zusammen und schreibt beide Seiten: Mac-Änderungen über EventKit in Calendar.app (und damit in iCloud/Google), der Palm bekommt den zusammengeführten Kalender als Ganzes. Beim ersten Mal lohnt ein Probelauf.",
+        "The HotSync reads the Palm's calendar, merges it field by field with the Mac and writes both sides: Mac changes through EventKit into Calendar.app (and on to iCloud/Google), the Palm gets the merged calendar whole. A dry run first is worth it."
     ) }
-    static var logTwoWayReading: String { s("Probelauf: lese den Kalender des Palms …", "Dry run: reading the Palm's calendar …") }
+    static var logTwoWayPending: String { s(
+        "Kalender: Abgleich in beide Richtungen nach der Sicherung; der Kalender wird nicht als Ganzes installiert",
+        "Calendar: two-way sync after the backup; the calendar is not installed whole"
+    ) }
+    static var logTwoWayReading: String { s("Kalender: lese den Kalender des Palms …", "Calendar: reading the Palm's calendar …") }
     static func logTwoWayMode(fast: Bool, lastSyncPC: UInt32, mirrorEntries: Int) -> String { s(
-        fast ? "Probelauf: schneller Abgleich möglich (Spiegel mit \(mirrorEntries) Einträgen, letzter PC passt)" : "Probelauf: langsamer Abgleich (Spiegel: \(mirrorEntries) Einträge, letzter PC \(lastSyncPC)); Datensätze werden nach Inhalt gepaart",
-        fast ? "Dry run: a fast sync would do (mirror with \(mirrorEntries) entries, last PC matches)" : "Dry run: slow sync (mirror: \(mirrorEntries) entries, last PC \(lastSyncPC)); records are paired by content"
+        fast ? "Kalender: schneller Abgleich möglich (Spiegel mit \(mirrorEntries) Einträgen, letzter PC passt)" : "Kalender: langsamer Abgleich (Spiegel: \(mirrorEntries) Einträge, letzter PC \(lastSyncPC)); Datensätze werden nach Inhalt gepaart",
+        fast ? "Calendar: a fast sync will do (mirror with \(mirrorEntries) entries, last PC matches)" : "Calendar: slow sync (mirror: \(mirrorEntries) entries, last PC \(lastSyncPC)); records are paired by content"
     ) }
     static func logTwoWaySummary(toPalm: Int, palmDeletes: Int, toMac: Int, macDeletes: Int, conflicts: Int, policy: ConflictPolicy) -> String { s(
-        "Probelauf: \(toPalm) auf den Palm, \(palmDeletes) dort löschen; \(toMac) auf den Mac, \(macDeletes) dort löschen; \(conflicts) Konflikte (\(conflictPolicyName(policy)))",
-        "Dry run: \(toPalm) to the Palm, \(palmDeletes) deleted there; \(toMac) to the Mac, \(macDeletes) deleted there; \(conflicts) conflicts (\(conflictPolicyName(policy)))"
+        "Kalender: \(toPalm) auf den Palm, \(palmDeletes) dort löschen; \(toMac) auf den Mac, \(macDeletes) dort löschen; \(conflicts) Konflikte (\(conflictPolicyName(policy)))",
+        "Calendar: \(toPalm) to the Palm, \(palmDeletes) deleted there; \(toMac) to the Mac, \(macDeletes) deleted there; \(conflicts) conflicts (\(conflictPolicyName(policy)))"
     ) }
     static var conflictPolicyLabel: String { s("Bei Konflikten:", "On conflicts:") }
     static func conflictPolicyName(_ p: ConflictPolicy) -> String {
@@ -581,11 +592,6 @@ enum L10n {
         "Categories the Palm does not have yet: \(names.joined(separator: ", "))"
     ) }
     static var logTwoWayDryRunDone: String { s("Probelauf beendet, nichts geschrieben", "Dry run done, nothing written") }
-    static var twoWayApplyToggle: String { s("… und anwenden (beide Seiten werden geschrieben)", "… and apply (both sides are written)") }
-    static var twoWayApplyHint: String { s(
-        "Erst einschalten, wenn der Probelauf im Log plausibel aussah. Mac-Änderungen gehen über EventKit in Calendar.app (und damit in iCloud/Google); der Palm bekommt den zusammengeführten Kalender als Ganzes; der Spiegel wird gespeichert, der nächste Abgleich ist ein schneller.",
-        "Turn on only once the dry run in the log looked right. Mac changes go through EventKit into Calendar.app (and on to iCloud/Google); the Palm gets the merged calendar whole; the mirror is saved and the next sync is a fast one."
-    ) }
     static func logTwoWayMacApplied(_ created: Int, _ updated: Int, _ deleted: Int) -> String { s(
         "Mac: \(created) neu, \(updated) geändert, \(deleted) gelöscht", "Mac: \(created) created, \(updated) updated, \(deleted) deleted"
     ) }

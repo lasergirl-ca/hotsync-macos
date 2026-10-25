@@ -40,42 +40,30 @@ struct CalendarSyncSection: View {
                     .disabled(accessStatus != .fullAccess)
                 }
                 if settings.enabled {
-                    Text(L10n.calendarSyncWarning)
+                    let twoWay = appState.deviceManager.profile(profileId)?.isCalendarTwoWay ?? false
+                    Text(twoWay ? L10n.twoWayHint : L10n.calendarSyncWarning)
                         .font(.caption)
-                        .foregroundStyle(.orange)
-                    Toggle(isOn: Binding(
-                        get: { appState.deviceManager.profile(profileId)?.isCalendarTwoWayDryRun ?? false },
-                        set: { appState.setCalendarTwoWayDryRun($0, for: profileId) }
-                    )) {
-                        Text(L10n.twoWayDryRunToggle)
+                        .foregroundStyle(twoWay ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 16) {
+                        Toggle(isOn: Binding(
+                            get: { appState.deviceManager.profile(profileId)?.isCalendarTwoWay ?? false },
+                            set: { appState.setCalendarTwoWay($0, for: profileId) }
+                        )) {
+                            Text(L10n.twoWayToggle)
+                        }
+                        if twoWay {
+                            Picker(selection: Binding(get: { settings.conflicts }, set: { v in update { $0.conflictPolicy = v } })) {
+                                ForEach(ConflictPolicy.allCases, id: \.self) { Text(L10n.conflictPolicyName($0)).tag($0) }
+                            } label: {
+                                Text(L10n.conflictPolicyLabel)
+                            }
+                            .pickerStyle(.menu)
+                            .fixedSize()
+                            .help(L10n.conflictPolicyHelp)
+                        }
                     }
                     .font(.caption)
-                    Text(L10n.twoWayDryRunHint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if appState.deviceManager.profile(profileId)?.isCalendarTwoWayDryRun == true {
-                        Picker(selection: Binding(get: { settings.conflicts }, set: { v in update { $0.conflictPolicy = v } })) {
-                            ForEach(ConflictPolicy.allCases, id: \.self) { Text(L10n.conflictPolicyName($0)).tag($0) }
-                        } label: {
-                            Text(L10n.conflictPolicyLabel)
-                        }
-                        .pickerStyle(.menu)
-                        .font(.caption)
-                        .fixedSize()
-                        .help(L10n.conflictPolicyHelp)
-                        Toggle(isOn: Binding(
-                            get: { appState.deviceManager.profile(profileId)?.isCalendarTwoWayApply ?? false },
-                            set: { appState.setCalendarTwoWayApply($0, for: profileId) }
-                        )) {
-                            Text(L10n.twoWayApplyToggle)
-                        }
-                        .font(.caption)
-                        Text(L10n.twoWayApplyHint)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
                 }
 
                 switch accessStatus {
@@ -92,7 +80,7 @@ struct CalendarSyncSection: View {
             }
             .padding(4)
         } label: {
-            Label(L10n.calendarSyncTitle, systemImage: "calendar")
+            Label(appState.deviceManager.profile(profileId)?.isCalendarTwoWay == true ? L10n.calendarSyncTitleTwoWay : L10n.calendarSyncTitle, systemImage: "calendar")
         }
         .onAppear {
             refreshAccess()
