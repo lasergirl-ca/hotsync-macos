@@ -15,8 +15,26 @@ APP_BUNDLE="$PROJECT_DIR/$APP_NAME.app"
 PILOT_PREFIX="$BUILD_DIR/pilot-link/install"
 SESSION_TOOL="$BUILD_DIR/release/hotsync-session"
 
-# Architekturen: universell (Apple Silicon und Intel). ARCHS="arm64" baut schneller
-# für den eigenen Mac; die Bibliotheken werden mit denselben Architekturen gebaut.
+# Architekturen, als Option:
+#   build.sh --universal   Apple Silicon und Intel in einem Bundle (Standard)
+#   build.sh --arm64       nur Apple Silicon, baut schneller
+#   build.sh --x86_64      nur Intel
+# oder ARCHS="arm64 x86_64" in der Umgebung. Die eingebetteten Bibliotheken
+# werden mit denselben Architekturen gebaut.
+for ARG in "$@"; do
+    case "$ARG" in
+        --universal) ARCHS="arm64 x86_64" ;;
+        --arm64|--native) ARCHS="arm64" ;;
+        --x86_64|--intel) ARCHS="x86_64" ;;
+        -h|--help)
+            echo "Aufruf: $0 [--universal | --arm64 | --x86_64]"
+            echo "  --universal  Apple Silicon und Intel (Standard)"
+            echo "  --arm64      nur Apple Silicon"
+            echo "  --x86_64     nur Intel"
+            exit 0 ;;
+        *) echo "Unbekannte Option: $ARG (siehe --help)"; exit 2 ;;
+    esac
+done
 ARCHS="${ARCHS:-arm64 x86_64}"
 ARCH_FLAGS="$(printf -- '-arch %s ' $ARCHS)"
 SWIFT_ARCHS="$(printf -- '--arch %s ' $ARCHS)"
@@ -32,6 +50,7 @@ CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 
 echo "=== HotSync Build ==="
 echo "Projekt: $PROJECT_DIR"
+echo "Architekturen: $ARCHS"
 echo ""
 
 # 1. Swift Build

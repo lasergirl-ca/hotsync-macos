@@ -136,7 +136,8 @@ unplugged can hang in `libusb_exit` for good &ndash; 1.0.30 and earlier have tha
 # Optional: regenerate the icon (Resources/AppIcon.icns is already included)
 swift Scripts/generate-icon.swift .
 
-# Build and create the app bundle
+# Build and create the app bundle: universal (Apple Silicon and Intel) by default,
+# --arm64 or --x86_64 for one architecture (faster)
 ./Scripts/build.sh
 
 # Start
@@ -144,7 +145,7 @@ open HotSync.app
 ```
 
 The build script:
-1. compiles with `swift build -c release`
+1. compiles with `swift build -c release` for the chosen architectures (`--universal`, the default, `--arm64` or `--x86_64`; the embedded libraries are built the same way)
 2. creates the `.app` bundle with `Info.plist`
 3. builds libusb, libusb-compat and libpisock (see above), compiles `Tools/hotsync-session/hotsync-session.c` against libpisock, copies it and all its
    non-system libraries (libpisock, libusb-compat, libusb &ndash; found recursively) into the
