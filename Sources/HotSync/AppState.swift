@@ -23,6 +23,7 @@ final class AppState {
     /// Calendar.app und Contacts.app für den Abgleich; je eine Instanz, sie halten die Freigabe
     let calendarSource = CalendarSource()
     let contactSource = ContactSource()
+    let reminderSource = ReminderSource()
     let portMonitor = PortMonitor()
 
     private(set) var queues: [UUID: InstallQueue] = [:]
@@ -894,6 +895,36 @@ final class AppState {
         refreshContactPreview(for: profileId)
     }
 
+    func setTaskSync(_ settings: TaskSyncSettings, for profileId: UUID) {
+        guard var profile = deviceManager.profile(profileId) else { return }
+        profile.taskSync = settings
+        deviceManager.updateProfile(profile)
+        refreshTaskPreview(for: profileId)
+    }
+
+    private(set) var taskPreviews: [UUID: String] = [:]
+
+    func taskPreview(for profileId: UUID) -> String? { taskPreviews[profileId] }
+
+    func refreshTaskPreview(for profileId: UUID) {
+        let key = "tasks-\(profileId)"
+        previewTasks[key]?.cancel()
+        guard let settings = deviceManager.profile(profileId)?.taskSync, !settings.lists.isEmpty,
+              reminderSource.hasAccess else {
+            if taskPreviews[profileId] != nil { taskPreviews[profileId] = nil }
+            return
+        }
+        let source = reminderSource
+        previewTasks[key] = Task { [weak self] in
+            let text: String? = await Task.detached {
+                guard let run = try? await TaskSyncRun(settings: settings, source: source) else { return nil }
+                return L10n.taskSyncPreview(run.report.records, run.report.categories.count - 1, run.report.completedSkipped)
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.taskPreviews[profileId] = text
+        }
+    }
+
     /// Was der nächste HotSync tragen würde, je Profil - einmal gerechnet,
     /// wenn sich die Einstellungen ändern, nicht bei jedem Zeichnen der View
     private(set) var calendarPreviews: [UUID: String] = [:]
@@ -1044,10 +1075,30 @@ final class AppState {
                 }
                 session.checkDatabases.append(ContactsBuilder.databaseName)
             }
+            if let settings = profile.taskSync, settings.enabled {
+                session.checkDatabases.append(TasksBuilder.databaseName)
+                if profile.lastBackupAt == nil {
+                    tabLog(tabId, L10n.logTasksNeedBackup)
+                } else {
+                    // Reminders liefert asynchron; der Palm wartet solange (Lebenszeichen)
+                    Task { @MainActor [weak self, weak session] in
+                        guard let self, let session else { return }
+                        await self.queueTasks(settings, profileId: profileId, tabId: tabId, queue: queue)
+                        self.startQueue(session, profileId: profileId, tabId: tabId, user: user, queue: queue, mode: mode)
+                    }
+                    return
+                }
+            }
         }
+        startQueue(session, profileId: profileId, tabId: tabId, user: user, queue: queue, mode: mode)
+    }
+
+    /// Die Warteschlange ist vollständig: was von ihr auf den Palm geht,
+    /// zurückspielen falls angefragt, dann installieren.
+    private func startQueue(_ session: Session, profileId: UUID, tabId: UUID, user: PalmUser, queue: InstallQueue, mode: HotSyncMode) {
         // "Nur abgleichen": von der Warteschlange gehen nur die Datenbanken
         // des Abgleichs auf den Palm, der Rest wartet
-        let synced = [CalendarBuilder.databaseName, ContactsBuilder.databaseName].map { "\($0).pdb" }
+        let synced = [CalendarBuilder.databaseName, ContactsBuilder.databaseName, TasksBuilder.databaseName].map { "\($0).pdb" }
         let files = mode.installs ? queue.pendingFiles : queue.pendingFiles.filter { synced.contains($0.lastPathComponent) }
         session.files = files
         queue.beginInstall(files, session: session.token)
@@ -1187,6 +1238,7 @@ final class AppState {
             switch name {
             case CalendarBuilder.databaseName: back = (try? CalendarEvent(data: record.data))?.encode()
             case ContactsBuilder.databaseName: back = (try? Contact(data: record.data))?.encode()
+            case TasksBuilder.databaseName: back = (try? PalmTask(data: record.data))?.encode()
             default: back = record.data
             }
             if back == record.data {
@@ -1202,6 +1254,7 @@ final class AppState {
             switch name {
             case CalendarBuilder.databaseName: categories = (try? CalendarAppInfo(data: info))?.categories.named.map(\.name) ?? []
             case ContactsBuilder.databaseName: categories = (try? ContactAppInfo(data: info))?.categories.named.map(\.name) ?? []
+            case TasksBuilder.databaseName: categories = (try? TaskAppInfo(data: info))?.categories.named.map(\.name) ?? []
             default: categories = (try? CategoryAppInfo(bytes: [UInt8](info)[...]))?.named.map(\.name) ?? []
             }
         } else {
@@ -1293,6 +1346,24 @@ final class AppState {
             }
         }
         session.runner.send("closedb")
+    }
+
+    /// Baut TasksDB-PTod aus Reminders.app und legt es in die Warteschlange.
+    private func queueTasks(_ settings: TaskSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue) async {
+        guard let profile = deviceManager.profile(profileId) else { return }
+        do {
+            let run = try await TaskSyncRun(settings: settings, source: reminderSource)
+            let url = deviceManager.installDirectory(for: profile)
+                .appendingPathComponent("\(TasksBuilder.databaseName).pdb")
+            let bytes = try run.write(to: url)
+            queue.refresh()
+            tabLog(tabId, L10n.logTasksQueued(run.report.records, run.report.completedSkipped, bytes))
+            for warning in run.report.warnings { tabLog(tabId, L10n.logTasksWarning(warning)) }
+        } catch TaskSyncRun.Failure.noAccess {
+            tabLog(tabId, L10n.logTasksNoAccess)
+        } catch {
+            tabLog(tabId, L10n.logTasksFailed(error.localizedDescription))
+        }
     }
 
     /// Baut ContactsDB-PAdd aus Contacts.app und legt es in die Warteschlange.

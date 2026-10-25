@@ -17,6 +17,8 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     var calendarSync: CalendarSyncSettings?
     /// Kontakte-Abgleich Mac → Palm: welche Konten; nil = nie eingerichtet
     var contactSync: ContactSyncSettings?
+    /// Aufgaben-Abgleich Mac → Palm: welche Erinnerungslisten; nil = nie eingerichtet
+    var taskSync: TaskSyncSettings?
     /// Die Uhr des Palms bei jedem HotSync vom Mac stellen; nil = an
     var clockSync: Bool?
     /// Die Zeitzonen-Regeln der Orte des Palms aus der tzdata des Macs

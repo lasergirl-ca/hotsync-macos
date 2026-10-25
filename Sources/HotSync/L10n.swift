@@ -533,6 +533,41 @@ enum L10n {
         "\(name) auf dem Palm: \(records) Datensätze, \(identical) lesbar, \(different) abweichend, \(deleted) gelöscht; Kategorien: \(categories.joined(separator: ", "))",
         "\(name) on the Palm: \(records) records, \(identical) decode, \(different) differ, \(deleted) deleted; categories: \(categories.joined(separator: ", "))"
     ) }
+    static var taskSyncTitle: String { s("Aufgaben: Mac → Palm", "Tasks: Mac → Palm") }
+    static var taskSyncToggle: String { s("Aufgaben abgleichen", "Sync Tasks") }
+    static var taskSyncChoose: String { s("Listen wählen", "Choose lists") }
+    static var taskSyncWarning: String { s(
+        "Die Aufgaben des Palms werden dabei ersetzt: Einträge, die auf dem Palm geändert wurden, gehen verloren.",
+        "The Palm's tasks are replaced: entries edited on the Palm are lost."
+    ) }
+    static var taskSyncAllow: String { s("Zugriff auf Erinnerungen erlauben …", "Allow access to Reminders …") }
+    static var taskSyncDenied: String { s(
+        "Kein Zugriff auf Erinnerungen: in den Systemeinstellungen unter Datenschutz & Sicherheit › Erinnerungen erlauben",
+        "No access to Reminders: allow it in System Settings under Privacy & Security › Reminders"
+    ) }
+    static var taskSyncHint: String { s(
+        "Jede Liste wird eine Kategorie auf dem Palm (bis 15). Erledigte Aufgaben bleiben so viele Tage auf dem Palm:",
+        "Each list becomes a category on the Palm (up to 15). Completed tasks stay on the Palm for this many days:"
+    ) }
+    static func taskSyncDays(_ days: Int) -> String { s("\(days) Tage", "\(days) days") }
+    static var taskSyncNoLists: String { s("Noch keine Liste gewählt", "No list chosen yet") }
+    static func taskSyncPreview(_ records: Int, _ categories: Int, _ skipped: Int) -> String { s(
+        "\(records) Aufgaben beim nächsten HotSync (\(categories) Kategorien, \(skipped) alte erledigte weggelassen)",
+        "\(records) tasks at the next HotSync (\(categories) categories, \(skipped) old completed ones left out)"
+    ) }
+    static func logTasksQueued(_ records: Int, _ skipped: Int, _ bytes: Int) -> String { s(
+        "Aufgaben gebaut: \(records) Einträge (\(skipped) alte erledigte weggelassen), TasksDB-PTod.pdb (\(bytes) Bytes) in der Warteschlange",
+        "Tasks built: \(records) records (\(skipped) old completed ones left out), TasksDB-PTod.pdb (\(bytes) bytes) queued"
+    ) }
+    static func logTasksWarning(_ text: String) -> String { s("Aufgaben: \(text)", "Tasks: \(text)") }
+    static var logTasksNoAccess: String { s(
+        "Aufgaben nicht gebaut: kein Zugriff auf Erinnerungen", "Tasks not built: no access to Reminders"
+    ) }
+    static func logTasksFailed(_ reason: String) -> String { s("Aufgaben nicht gebaut: \(reason)", "Tasks not built: \(reason)") }
+    static var logTasksNeedBackup: String { s(
+        "Aufgaben noch nicht auf den Palm gespielt: erst muss eine Sicherung dieses Palms da sein (dieser HotSync legt sie an)",
+        "Tasks not put on the Palm yet: a backup of this Palm has to exist first (this HotSync makes it)"
+    ) }
     static var timeSyncTitle: String { s("Uhr und Zeitzonen", "Clock and time zones") }
     static var clockSyncToggle: String { s("Uhr des Palms vom Mac stellen", "Set the Palm's clock from the Mac") }
     static var clockSyncHint: String { s(

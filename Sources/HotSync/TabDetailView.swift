@@ -29,6 +29,7 @@ struct TabDetailView: View {
                     }
                     CalendarSyncSection(profileId: tab.profileId)
                     ContactSyncSection(profileId: tab.profileId)
+                    TaskSyncSection(profileId: tab.profileId)
                     TimeSyncSection(profileId: tab.profileId)
                     if let queue = appState.queue(for: tab) {
                         QueueSection(queue: queue, profileId: tab.profileId,
