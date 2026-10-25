@@ -46,7 +46,8 @@ public struct DSTRule: Equatable, Sendable {
 ///      3  dstStart     DSTRule
 ///      7  dstEnd       DSTRule
 ///     11  dstObserved  0x3C = yes, 0 = no
-///     12  t4           meaning unknown
+///     12  country      Palm OS country code (Canada 4, France 7, Germany 8,
+///                      UK 22, US 23, …), from a T|X's location databases
 ///     13  unknown      0x80 or 0
 ///     14  name         NUL-terminated, up to 21 characters
 public struct PalmTimezone: Equatable, Sendable {
@@ -55,7 +56,7 @@ public struct PalmTimezone: Equatable, Sendable {
     public var dstStart: DSTRule
     public var dstEnd: DSTRule
     public var observesDST: Bool
-    public var t4: UInt8
+    public var country: UInt8
     public var unknown: UInt8
     public var name: String
 
@@ -64,14 +65,14 @@ public struct PalmTimezone: Equatable, Sendable {
     public init(offsetMinutes: Int16, name: String, observesDST: Bool = false,
                 dstStart: DSTRule = DSTRule(weekday: 0, week: 0, month: 0),
                 dstEnd: DSTRule = DSTRule(weekday: 0, week: 0, month: 0),
-                t2: UInt8 = 0, t4: UInt8 = 0, unknown: UInt8 = 0x80) {
+                t2: UInt8 = 0, country: UInt8 = 0, unknown: UInt8 = 0x80) {
         self.offsetMinutes = offsetMinutes
         self.name = name
         self.observesDST = observesDST
         self.dstStart = dstStart
         self.dstEnd = dstEnd
         self.t2 = t2
-        self.t4 = t4
+        self.country = country
         self.unknown = unknown
     }
 
@@ -95,7 +96,7 @@ public struct PalmTimezone: Equatable, Sendable {
             throw PalmFormatError.invalidValue(field: "tz.dstObserved", value: Int(observed))
         }
         tz.observesDST = observed == 0x3C
-        tz.t4 = try r.u8()
+        tz.country = try r.u8()
         tz.unknown = try r.u8()
         tz.name = try r.cString()
         return tz
@@ -113,7 +114,7 @@ public struct PalmTimezone: Equatable, Sendable {
         dstStart.encode(&w)
         dstEnd.encode(&w)
         w.u8(observesDST ? 0x3C : 0)
-        w.u8(t4)
+        w.u8(country)
         w.u8(unknown)
         w.cString(name)
     }

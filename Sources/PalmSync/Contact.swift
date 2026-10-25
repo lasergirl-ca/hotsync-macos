@@ -211,6 +211,7 @@ public struct ContactAppInfo: Equatable, Sendable {
     public var categories: CategoryAppInfo
     public var internalBytes: Data
     public var labels: [String]
+    /// Palm OS country code: Canada 4, France 7, Germany 8, UK 22, US 23 …
     public var country: UInt8
     public var countryPadding: UInt8
     public var sortByCompany: Bool

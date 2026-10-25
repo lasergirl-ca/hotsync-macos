@@ -149,6 +149,18 @@ public struct ContactsBuilder {
         "Picture", "Anniversary", "", ""
     ]
 
+    /// Palm OS country codes for the AppInfo, by ISO region.
+    public static let palmCountries: [String: UInt8] = [
+        "AU": 0, "AT": 1, "BE": 2, "BR": 3, "CA": 4, "DK": 5, "FI": 6, "FR": 7, "DE": 8, "HK": 9,
+        "IS": 10, "IE": 11, "IT": 12, "JP": 13, "LU": 14, "MX": 15, "NL": 16, "NZ": 17, "NO": 18,
+        "ES": 19, "SE": 20, "CH": 21, "GB": 22, "US": 23, "IN": 24, "ID": 25, "KR": 26, "MY": 27,
+        "CN": 28, "PH": 29, "SG": 30, "TH": 31, "TW": 32,
+    ]
+
+    public static func palmCountry(for locale: Locale = .current) -> UInt8 {
+        locale.region.flatMap { palmCountries[$0.identifier] } ?? 23
+    }
+
     public let options: Options
 
     public init(options: Options) {
@@ -192,7 +204,8 @@ public struct ContactsBuilder {
 
         var db = PalmDatabase(name: Self.databaseName, type: "DATA", creator: "PAdd", attributes: 0, version: 1,
                               appInfo: ContactAppInfo(categories: CategoryAppInfo(names: names),
-                                                      labels: Self.standardLabels).encode())
+                                                      labels: Self.standardLabels,
+                                                      country: Self.palmCountry()).encode())
         db.records = sorted.enumerated().map { i, contact in
             let record = convert(contact, &report)
             let category = contact.groups.first.flatMap { categoryOf[String($0.prefix(CategoryAppInfo.nameWidth - 1))] } ?? 0
