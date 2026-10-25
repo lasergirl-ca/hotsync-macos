@@ -190,7 +190,7 @@ public struct ContactsBuilder {
             return ka < kb
         }
 
-        var db = PalmDatabase(name: Self.databaseName, type: "DATA", creator: "PAdd",
+        var db = PalmDatabase(name: Self.databaseName, type: "DATA", creator: "PAdd", attributes: 0, version: 1,
                               appInfo: ContactAppInfo(categories: CategoryAppInfo(names: names),
                                                       labels: Self.standardLabels).encode())
         db.records = sorted.enumerated().map { i, contact in

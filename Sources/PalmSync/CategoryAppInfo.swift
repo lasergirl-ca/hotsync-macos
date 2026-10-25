@@ -21,11 +21,13 @@ public struct CategoryAppInfo: Equatable, Sendable {
     public static let nameWidth = 16
     public static let size = 278
 
-    public init(names: [String] = ["Unfiled"], ids: [UInt8]? = nil, lastUniqueID: UInt8? = nil) {
+    /// A new block as a Palm OS 5 device makes one: every slot has its ID
+    /// 0-15 and lastUniqueID is 15, named or not.
+    public init(names: [String] = ["Unfiled"], ids: [UInt8]? = nil, lastUniqueID: UInt8 = 15) {
         renamed = 0
         self.names = names + Array(repeating: "", count: max(0, Self.count - names.count))
         self.ids = ids ?? (0..<Self.count).map { UInt8($0) }
-        self.lastUniqueID = lastUniqueID ?? UInt8(max(0, names.count - 1))
+        self.lastUniqueID = lastUniqueID
         padding = [0, 0, 0]
     }
 

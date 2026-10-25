@@ -123,7 +123,9 @@ public struct CalendarBuilder {
             }
         }
 
-        var db = PalmDatabase(name: Self.databaseName, type: "DATA", creator: "PDat",
+        // version 1, no flags: what a Palm OS 5.4 device gives its own PIM
+        // databases. Version 0 sends the Calendar down its conversion path.
+        var db = PalmDatabase(name: Self.databaseName, type: "DATA", creator: "PDat", attributes: 0, version: 1,
                               appInfo: CalendarAppInfo(categories: categories, startOfWeek: options.startOfWeek).encode())
         db.records = items.enumerated().map { i, item in
             PalmDatabase.Record(category: names.firstIndex(of: item.category) ?? 0, uniqueID: UInt32(i + 1),
@@ -274,7 +276,9 @@ public struct CalendarBuilder {
                                 end: PalmTime(hour: end.hour!, minute: end.minute!))
         }
 
-        record.title = event.title
+        // the Palm shows the description everywhere and never has an empty one
+        let title = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        record.title = title.isEmpty ? "(untitled)" : title
         var note = event.notes ?? ""
         if let url = event.url {
             note += note.isEmpty ? url.absoluteString : "\n\(url.absoluteString)"

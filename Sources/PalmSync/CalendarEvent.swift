@@ -260,7 +260,9 @@ public struct CalendarEvent: Equatable, Sendable {
 }
 
 /// The AppInfo block of CalendarDB-PDat: the category block, the first day
-/// of the week, and 18 bytes nobody has documented (kept as they are).
+/// of the week, and bytes nobody has documented (kept as they are). A
+/// T|X writes 300 bytes for its PIM databases (278 + 2 + 20); pilot-link
+/// knows 298. Either is read; new blocks are written the T|X's size.
 public struct CalendarAppInfo: Equatable, Sendable {
     public var categories: CategoryAppInfo
     /// 0 = Sunday, 1 = Monday
@@ -268,13 +270,14 @@ public struct CalendarAppInfo: Equatable, Sendable {
     public var padding: UInt8
     public var internalBytes: Data
 
-    public static let size = CategoryAppInfo.size + 2 + 18
+    /// The size a Palm OS 5.4 device writes.
+    public static let size = CategoryAppInfo.size + 2 + 20
 
     public init(categories: CategoryAppInfo = CategoryAppInfo(), startOfWeek: UInt8 = 0) {
         self.categories = categories
         self.startOfWeek = startOfWeek
         padding = 0
-        internalBytes = Data(count: 18)
+        internalBytes = Data(count: 20)
     }
 
     public init(data: Data) throws {

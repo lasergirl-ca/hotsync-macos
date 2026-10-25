@@ -23,7 +23,7 @@ private func calendarFixture() throws -> PalmDatabase {
     #expect(db.creator == "PDat")
     #expect(db.attributes == 0x0008)
     #expect(db.records.count == 13)
-    #expect(db.appInfo?.count == CalendarAppInfo.size)
+    #expect(db.appInfo?.count == 298)   // pilot-link writes 298, a T|X 300
     #expect(db.sortInfo == nil)
     #expect(PalmDatabase.date(fromPalmSeconds: db.creationDate) == Date(timeIntervalSince1970: 1_792_368_000))
     #expect(PalmDatabase.date(fromPalmSeconds: db.lastBackupDate) == nil)

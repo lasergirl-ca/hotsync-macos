@@ -111,7 +111,9 @@ private func decoded(_ db: PalmDatabase) -> [CalendarEvent] {
     var late = event("Party", at(2026, 12, 31, 22, 0), minutes: 240)
     late.alarmOffset = -90 * 60
     late.location = "Downtown"
-    let records = decoded(builder().build([e, late]).database)
+    let untitled = event("   ", at(2027, 1, 1, 9, 0))
+    let records = decoded(builder().build([e, late, untitled]).database)
+    #expect(records[2].title == "(untitled)")
     #expect(records[0].time == nil)
     #expect(records[0].note == "Pack\nhttps://meet.example/x")
     #expect(records[0].location == nil)
@@ -253,5 +255,9 @@ private func decoded(_ db: PalmDatabase) -> [CalendarEvent] {
     let data = db.encode()
     let file = try! PalmDatabaseFile.inspect(data: data, fileExtension: "pdb").get()
     #expect(file.name == "CalendarDB-PDat" && file.creator == "PDat" && file.recordCount == 1)
+    // what a Palm OS 5.4 device writes for its own PIM databases
+    #expect(db.version == 1 && db.attributes == 0 && db.appInfo?.count == 300)
+    let info = try! CalendarAppInfo(data: db.appInfo!)
+    #expect(info.categories.lastUniqueID == 15 && info.categories.ids == Array(0...15))
     #expect(try! PalmDatabase(data: data) == db)
 }
