@@ -119,9 +119,8 @@ public enum TimeZoneFixups {
         let index = (c.day! - 1) / 7
         // the Palm says "last" rather than "fourth" when it is the last one
         let week = c.day! + 7 > daysInMonth ? 4 : index
-        // the transition hour as the Palm stores it (2 for 2:00; the second
-        // before 2:00 is in hour 1)
-        return DSTRule(weekday: UInt8(c.weekday! - 1), week: UInt8(week), month: UInt8(c.month!), unknown: UInt8(c.hour! + 1))
+        // the fourth byte is not the hour (see fix); 0 until it is understood
+        return DSTRule(weekday: UInt8(c.weekday! - 1), week: UInt8(week), month: UInt8(c.month!), unknown: 0)
     }
 
     /// The record as it should be, with what changed in words; nil when the
@@ -132,7 +131,13 @@ public enum TimeZoneFixups {
         var fixed = location
         fixed.timezone.offsetMinutes = rule.offsetMinutes
         fixed.timezone.observesDST = rule.observesDST
-        if rule.observesDST, let start = rule.dstStart, let end = rule.dstEnd {
+        if rule.observesDST, var start = rule.dstStart, var end = rule.dstEnd {
+            // The fourth byte of a rule is not the hour: a T|X writes 1 or 2
+            // in the start rule and always 0 in the end rule, and a device
+            // shown other values computes wild offsets. Keep what the record
+            // had; a record that had no rules gets the device's usual values.
+            start.unknown = location.timezone.observesDST ? location.timezone.dstStart.unknown : 2
+            end.unknown = location.timezone.observesDST ? location.timezone.dstEnd.unknown : 0
             fixed.timezone.dstStart = start
             fixed.timezone.dstEnd = end
         } else {

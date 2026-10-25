@@ -30,8 +30,8 @@ private let now = ISO8601DateFormatter().date(from: "2026-10-24T12:00:00Z")!
     let toronto = try #require(try deviceLocations()["Toronto"])
     let (fixed, change) = try #require(TimeZoneFixups.fix(toronto, now: now))
     #expect(fixed.timezone.offsetMinutes == -300 && fixed.timezone.observesDST)
-    #expect(fixed.timezone.dstStart == DSTRule(weekday: 0, week: 1, month: 3, unknown: 2))   // second Sunday of March, 2:00
-    #expect(fixed.timezone.dstEnd == DSTRule(weekday: 0, week: 0, month: 11, unknown: 2))    // first Sunday of November
+    #expect(fixed.timezone.dstStart == DSTRule(weekday: 0, week: 1, month: 3, unknown: 1))   // second Sunday of March; byte 4 as the device had it
+    #expect(fixed.timezone.dstEnd == DSTRule(weekday: 0, week: 0, month: 11, unknown: 0))    // first Sunday of November
     #expect(change.contains("Toronto") && change.contains("America/Toronto"))
     // the rest of the record is untouched
     #expect(fixed.timezone.country == toronto.timezone.country && fixed.latitudeDegrees == toronto.latitudeDegrees)
@@ -79,8 +79,8 @@ private let now = ISO8601DateFormatter().date(from: "2026-10-24T12:00:00Z")!
 
     let berlin = TimeZoneFixups.rule(of: TimeZone(identifier: "Europe/Berlin")!, now: now)
     #expect(berlin.offsetMinutes == 60 && berlin.observesDST)
-    #expect(berlin.dstStart == DSTRule(weekday: 0, week: 4, month: 3, unknown: 2))    // last Sunday of March, 2:00
-    #expect(berlin.dstEnd == DSTRule(weekday: 0, week: 4, month: 10, unknown: 3))     // last Sunday of October, 3:00
+    #expect(berlin.dstStart == DSTRule(weekday: 0, week: 4, month: 3, unknown: 0))    // last Sunday of March
+    #expect(berlin.dstEnd == DSTRule(weekday: 0, week: 4, month: 10, unknown: 0))     // last Sunday of October
 
     let sydney = TimeZoneFixups.rule(of: TimeZone(identifier: "Australia/Sydney")!, now: now)
     #expect(sydney.offsetMinutes == 600 && sydney.observesDST)
