@@ -1,7 +1,7 @@
 import Foundation
 
 /// What identifies an item on the Mac side: the series (EventKit's
-/// calendarItemIdentifier) and, for an occurrence that stands on its own on
+/// calendarItemIdentifier, a CNContact's identifier) and, for an occurrence that stands on its own on
 /// the Palm (edited on the Mac, or expanded because the Palm cannot express
 /// the rule), the date the rule put it on.
 public struct MacKey: Hashable, Codable, Sendable {
@@ -17,16 +17,16 @@ public struct MacKey: Hashable, Codable, Sendable {
 /// One synced item, as both sides agreed on it at the last sync. The merge
 /// compares each side against `base`; `palmRecord` keeps the Palm's bytes so
 /// an update can be written without losing the blobs the Palm put there.
-public struct MirrorEntry: Equatable, Codable, Sendable {
+public struct MirrorEntry<Item: SyncedItem>: Equatable, Codable, Sendable {
     public var palmID: UInt32
     public var mac: MacKey
-    public var base: SyncedEvent
+    public var base: Item
     public var palmRecord: Data
     /// The Mac owns this item (an expanded occurrence of a rule the Palm
     /// cannot express): edits made on the Palm are logged and undone.
     public var macOwned: Bool
 
-    public init(palmID: UInt32, mac: MacKey, base: SyncedEvent, palmRecord: Data, macOwned: Bool = false) {
+    public init(palmID: UInt32, mac: MacKey, base: Item, palmRecord: Data, macOwned: Bool = false) {
         self.palmID = palmID
         self.mac = mac
         self.base = base
@@ -38,14 +38,14 @@ public struct MirrorEntry: Equatable, Codable, Sendable {
 /// The sync state for one Palm database on one device. Lose it and the next
 /// sync is a slow one that matches records by content. Kept as a JSON file
 /// next to the device's backup: small, readable, diffable.
-public struct SyncMirror: Equatable, Codable, Sendable {
+public struct SyncMirror<Item: SyncedItem>: Equatable, Codable, Sendable {
     /// This Mac's ID as written into the Palm's lastSyncPC: when the Palm
     /// reports the same one, its modified flags are trustworthy.
     public var pcID: UInt32
     public var lastSync: Date?
-    public var entries: [MirrorEntry]
+    public var entries: [MirrorEntry<Item>]
 
-    public init(pcID: UInt32, lastSync: Date? = nil, entries: [MirrorEntry] = []) {
+    public init(pcID: UInt32, lastSync: Date? = nil, entries: [MirrorEntry<Item>] = []) {
         self.pcID = pcID
         self.lastSync = lastSync
         self.entries = entries

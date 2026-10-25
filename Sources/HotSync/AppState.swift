@@ -618,7 +618,7 @@ final class AppState {
         /// der zusammengeführte Kalender, der nach dem Schließen installiert
         /// wird, und der Spiegel, der danach gespeichert wird
         var twoWayInstall: URL?
-        var twoWayMirror: SyncMirror?
+        var twoWayMirror: CalendarMirror?
         var restoreFiles: [URL] = []
         var restoreDone = 0
         var restoreFailed = 0
@@ -1365,7 +1365,7 @@ final class AppState {
         guard let tabId = session.tabId, let profileId = session.profileId,
               let profile = deviceManager.profile(profileId), let settings = profile.calendarSync else { return }
         let url = mirrorURL(for: profile)
-        let mirror = (try? SyncMirror.load(from: url)) ?? SyncMirror(pcID: SyncMirror.newPCID())
+        let mirror = (try? CalendarMirror.load(from: url)) ?? CalendarMirror(pcID: CalendarMirror.newPCID())
         let fast = mirror.lastSync != nil && session.lastSyncPC == mirror.pcID
         tabLog(tabId, L10n.logTwoWayMode(fast: fast, lastSyncPC: session.lastSyncPC, mirrorEntries: mirror.entries.count))
 
@@ -1397,10 +1397,10 @@ final class AppState {
                 let title = (try? CalendarEvent(data: w.record))?.title ?? "?"
                 lines.append(L10n.logTwoWayToPalm(title, new: w.id == nil))
             }
-            for c in plan.macCreates.prefix(10) { lines.append(L10n.logTwoWayToMac(c.event.title ?? "?", new: true)) }
-            for c in plan.macUpdates.prefix(10) { lines.append(L10n.logTwoWayToMac(c.event.title ?? "?", new: false)) }
+            for c in plan.macCreates.prefix(10) { lines.append(L10n.logTwoWayToMac(c.item.title ?? "?", new: true)) }
+            for c in plan.macUpdates.prefix(10) { lines.append(L10n.logTwoWayToMac(c.item.title ?? "?", new: false)) }
             for conflict in plan.conflicts.prefix(10) {
-                lines.append(L10n.logTwoWayConflict(conflict.title, conflict.field.rawValue, conflict.palmValue, conflict.macValue,
+                lines.append(L10n.logTwoWayConflict(conflict.title, conflict.field, conflict.palmValue, conflict.macValue,
                                                     policy: settings.conflicts))
             }
             for line in lines { tabLog(tabId, "  " + line) }
@@ -1422,7 +1422,7 @@ final class AppState {
     /// Anwenden: die Mac-Seite über EventKit, der Palm bekommt den
     /// zusammengeführten Kalender als Ganzes (nach dem Schließen installiert),
     /// danach Spiegel speichern und lastSyncPC setzen.
-    private func twoWayApply(_ plan: SyncPlan, mirror: SyncMirror, session: Session, profile: DeviceProfile,
+    private func twoWayApply(_ plan: CalendarSyncPlan, mirror: CalendarMirror, session: Session, profile: DeviceProfile,
                              settings: CalendarSyncSettings, palmCategories: CategoryAppInfo, startOfWeek: UInt8) {
         guard let tabId = session.tabId else { return }
         let calendars = settings.calendars

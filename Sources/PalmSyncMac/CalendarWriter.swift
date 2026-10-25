@@ -105,39 +105,39 @@ public struct CalendarWriter {
 
     /// Applies the plan's Mac changes: creates, updates, deletes, in that
     /// order. A failure is recorded and the rest goes on.
-    public func apply(_ plan: SyncPlan) -> Result {
+    public func apply(_ plan: CalendarSyncPlan) -> Result {
         var result = Result()
 
         for change in plan.macCreates {
-            guard let target = calendarForCategory(change.event.category) ?? store.defaultCalendarForNewEvents else {
-                result.failures.append("\(change.event.title ?? "?"): no calendar for category \(change.event.category)")
+            guard let target = calendarForCategory(change.item.category) ?? store.defaultCalendarForNewEvents else {
+                result.failures.append("\(change.item.title ?? "?"): no calendar for category \(change.item.category)")
                 continue
             }
             let ek = EKEvent(eventStore: store)
             ek.calendar = target
-            Self.fill(ek, from: change.event, in: calendar)
+            Self.fill(ek, from: change.item, in: calendar)
             do {
                 try store.save(ek, span: .futureEvents, commit: true)
-                removeExceptions(of: ek, change.event.exceptions)
+                removeExceptions(of: ek, change.item.exceptions)
                 result.createdKeys[change.entry] = MacKey(seriesID: ek.calendarItemIdentifier)
             } catch {
-                result.failures.append("\(change.event.title ?? "?"): \(error.localizedDescription)")
+                result.failures.append("\(change.item.title ?? "?"): \(error.localizedDescription)")
             }
         }
 
         for change in plan.macUpdates {
             guard let key = change.key, let ek = find(key) else {
-                result.failures.append("\(change.event.title ?? "?"): not found on the Mac any more")
+                result.failures.append("\(change.item.title ?? "?"): not found on the Mac any more")
                 continue
             }
-            Self.fill(ek, from: change.event, in: calendar)
-            if let target = calendarForCategory(change.event.category), target != ek.calendar { ek.calendar = target }
+            Self.fill(ek, from: change.item, in: calendar)
+            if let target = calendarForCategory(change.item.category), target != ek.calendar { ek.calendar = target }
             do {
                 try store.save(ek, span: key.occurrence == nil ? .futureEvents : .thisEvent, commit: true)
-                if key.occurrence == nil { removeExceptions(of: ek, change.event.exceptions) }
+                if key.occurrence == nil { removeExceptions(of: ek, change.item.exceptions) }
                 result.updated += 1
             } catch {
-                result.failures.append("\(change.event.title ?? "?"): \(error.localizedDescription)")
+                result.failures.append("\(change.item.title ?? "?"): \(error.localizedDescription)")
             }
         }
 

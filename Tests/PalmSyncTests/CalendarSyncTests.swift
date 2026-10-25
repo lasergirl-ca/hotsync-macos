@@ -43,7 +43,7 @@ private func event(_ data: Data) -> CalendarEvent { try! CalendarEvent(data: dat
 /// A mirror as a first sync leaves it: `standup` on both sides, agreed.
 private let standupStart = at(2026, 10, 20, 9, 0)
 private let standupDate = PalmDate(year: 2026, month: 10, day: 20)
-private func syncedMirror() -> SyncMirror {
+private func syncedMirror() -> CalendarMirror {
     let plan = try! engine.plan(palm: .all([]), palmCategories: palmCategories,
                                 mac: items([macEvent("Standup", standupStart)]), mirror: SyncMirror(pcID: 7))
     return plan.mirror(after: SyncMirror(pcID: 7), palmIDs: [0: 0x1001], macKeys: [:], at: at(2026, 10, 19, 12, 0))
@@ -59,7 +59,7 @@ private func syncedMirror() -> SyncMirror {
     #expect(plan.palmWrites.count == 2 && plan.palmWrites.allSatisfy { $0.id == nil })
     #expect(plan.palmWrites.map(\.category) == [1, 2])
     #expect(event(plan.palmWrites[1].record).title == "Dinner")
-    #expect(plan.macCreates.count == 1 && plan.macCreates[0].event.title == "Dentist" && plan.macCreates[0].event.category == "Personal")
+    #expect(plan.macCreates.count == 1 && plan.macCreates[0].item.title == "Dentist" && plan.macCreates[0].item.category == "Personal")
     #expect(plan.palmDeletes.isEmpty && plan.macUpdates.isEmpty && plan.macDeletes.isEmpty && plan.conflicts.isEmpty)
     #expect(plan.entries.count == 3)
 
@@ -96,7 +96,7 @@ private func syncedMirror() -> SyncMirror {
     let mirror = syncedMirror()
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("palmsync-test-\(UUID().uuidString).json")
     try mirror.save(to: url)
-    #expect(try SyncMirror.load(from: url) == mirror)
+    #expect(try CalendarMirror.load(from: url) == mirror)
     try FileManager.default.removeItem(at: url)
 }
 
@@ -123,7 +123,7 @@ private func syncedMirror() -> SyncMirror {
     let record = event(plan.palmWrites[0].record)
     #expect(record.time?.start == PalmTime(hour: 9, minute: 30) && record.location == "Room 4")
     #expect(plan.macUpdates.isEmpty && plan.conflicts.isEmpty)
-    #expect(plan.entries[0].event.location == "Room 4")
+    #expect(plan.entries[0].item.location == "Room 4")
 }
 
 @Test func palmEditGoesToTheMac() throws {
@@ -133,7 +133,7 @@ private func syncedMirror() -> SyncMirror {
     #expect(plan.palmWrites.isEmpty)
     #expect(plan.macUpdates.count == 1)
     #expect(plan.macUpdates[0].key == MacKey(seriesID: "Standup"))
-    #expect(plan.macUpdates[0].event.title == "Standup (moved)" && plan.macUpdates[0].event.time?.start == PalmTime(hour: 10, minute: 0))
+    #expect(plan.macUpdates[0].item.title == "Standup (moved)" && plan.macUpdates[0].item.time?.start == PalmTime(hour: 10, minute: 0))
     #expect(plan.entries[0].palmRecord == edited.data)
 }
 
@@ -145,7 +145,7 @@ private func syncedMirror() -> SyncMirror {
     #expect(plan.conflicts.isEmpty)
     let toPalm = event(plan.palmWrites[0].record)
     #expect(toPalm.title == "Standup!" && toPalm.time?.start == PalmTime(hour: 9, minute: 15))
-    #expect(plan.macUpdates[0].event.title == "Standup!" && plan.macUpdates[0].event.time?.start == PalmTime(hour: 9, minute: 15))
+    #expect(plan.macUpdates[0].item.title == "Standup!" && plan.macUpdates[0].item.time?.start == PalmTime(hour: 9, minute: 15))
 }
 
 @Test func sameFieldConflictGoesToTheMacAndTheLog() throws {
@@ -153,10 +153,10 @@ private func syncedMirror() -> SyncMirror {
     let plan = try engine.plan(palm: .modified([palmEdit]), palmCategories: palmCategories,
                                mac: items([macEvent("Standup (Mac)", standupStart, series: "Standup")]), mirror: syncedMirror())
     #expect(plan.conflicts.count == 1)
-    #expect(plan.conflicts[0].field == .title && plan.conflicts[0].palmValue == "Standup (Palm)" && plan.conflicts[0].macValue == "Standup (Mac)")
+    #expect(plan.conflicts[0].field == "title" && plan.conflicts[0].palmValue == "Standup (Palm)" && plan.conflicts[0].macValue == "Standup (Mac)")
     #expect(event(plan.palmWrites[0].record).title == "Standup (Mac)")
     #expect(plan.macUpdates.isEmpty)
-    #expect(plan.entries[0].event.title == "Standup (Mac)")
+    #expect(plan.entries[0].item.title == "Standup (Mac)")
 }
 
 @Test func palmBlobsSurviveAMacEdit() throws {
@@ -203,7 +203,7 @@ private func syncedMirror() -> SyncMirror {
     let editedOnPalm = palmRecord(id: 0x1001, "Standup", standupDate, note: "keep me", attributes: 0x40)
     let b = try engine.plan(palm: .modified([editedOnPalm]), palmCategories: palmCategories, mac: [], mirror: syncedMirror())
     #expect(b.palmDeletes.isEmpty)
-    #expect(b.macCreates.count == 1 && b.macCreates[0].event.note == "keep me")
+    #expect(b.macCreates.count == 1 && b.macCreates[0].item.note == "keep me")
     #expect(b.entries[0].palmID == 0x1001 && b.entries[0].mac == nil)
 }
 
@@ -297,8 +297,8 @@ private func syncedMirror() -> SyncMirror {
                                   mac: items([macEvent("Standup (Mac)", standupStart, series: "Standup")]), mirror: syncedMirror())
     #expect(plan.conflicts.count == 1)
     #expect(plan.palmWrites.isEmpty)   // the Palm already has the winning value
-    #expect(plan.macUpdates.count == 1 && plan.macUpdates[0].event.title == "Standup (Palm)")
-    #expect(plan.entries[0].event.title == "Standup (Palm)")
+    #expect(plan.macUpdates.count == 1 && plan.macUpdates[0].item.title == "Standup (Palm)")
+    #expect(plan.entries[0].item.title == "Standup (Palm)")
 }
 
 @Test func keepBothPolicyDuplicatesThePalmsVersion() throws {
@@ -309,10 +309,10 @@ private func syncedMirror() -> SyncMirror {
                              mac: items([macEvent("Standup (Mac)", standupStart, series: "Standup")]), mirror: syncedMirror())
     #expect(plan.conflicts.count == 1)
     // the paired item takes the Mac's value …
-    #expect(plan.entries.contains { $0.palmID == 0x1001 && $0.event.title == "Standup (Mac)" })
+    #expect(plan.entries.contains { $0.palmID == 0x1001 && $0.item.title == "Standup (Mac)" })
     // … and the Palm's version becomes a new item on both sides
     let copy = try #require(plan.entries.firstIndex { $0.palmID == nil && $0.mac == nil })
-    #expect(plan.entries[copy].event.title == "Standup (Palm)")
+    #expect(plan.entries[copy].item.title == "Standup (Palm)")
     #expect(plan.palmWrites.contains { $0.entry == copy && $0.id == nil })
     #expect(plan.macCreates.contains { $0.entry == copy })
     #expect(plan.log.contains { $0.contains("kept as a second item") })
