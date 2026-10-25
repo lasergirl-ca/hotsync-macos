@@ -254,3 +254,35 @@ private func syncedMirror() -> SyncMirror {
     #expect(plan.palmWrites[0].category == 0)
     #expect(plan.missingCategories == ["Family"])
 }
+
+// MARK: - Installing the Palm side whole
+
+@Test func planBecomesAWholePalmDatabase() throws {
+    let mac = items([macEvent("Standup", standupStart), macEvent("Dinner", at(2026, 10, 21, 19, 0), calendar: "ical-family")])
+    let palm = PalmSnapshot.all([palmRecord(id: 0x2001, "Dentist", PalmDate(year: 2026, month: 10, day: 22), category: 1)])
+    let plan = try engine.plan(palm: palm, palmCategories: palmCategories, mac: mac, mirror: SyncMirror(pcID: 7))
+
+    let (db, palmIDs, categories) = plan.palmDatabase(categories: CategoryAppInfo(names: palmCategories))
+    #expect(db.records.count == 3 && db.name == "CalendarDB-PDat" && db.version == 1)
+    // the Palm's own record keeps its ID, the Mac's two get new ones above it
+    #expect(db.records.map(\.uniqueID).sorted() == [0x2001, 0x2002, 0x2003])
+    #expect(palmIDs.count == 2 && palmIDs.values.allSatisfy { $0 > 0x2001 })
+    #expect(db.uniqueIDSeed == 0x2004)
+    // sorted by date: Standup (20th), Dinner (21st), Dentist (22nd)
+    #expect(try db.records.map { try CalendarEvent(data: $0.data).title } == ["Standup", "Dinner", "Dentist"])
+    #expect(db.records.map(\.category) == [1, 2, 1])
+    #expect(categories.names.prefix(3) == ["Unfiled", "Personal", "Family"])
+
+    // the mirror built from those IDs is complete
+    let mirror = plan.mirror(after: SyncMirror(pcID: 7), palmIDs: palmIDs, macKeys: [plan.macCreates[0].entry: MacKey(seriesID: "new")])
+    #expect(mirror.entries.count == 3)
+    #expect(try PalmDatabase(data: db.encode()) == db)
+}
+
+@Test func unknownCategoryGetsAFreeSlot() throws {
+    let mac = items([macEvent("Dinner", at(2026, 10, 21, 19, 0), calendar: "ical-family")])
+    let plan = try engine.plan(palm: .all([]), palmCategories: ["Unfiled", "Personal"], mac: mac, mirror: SyncMirror(pcID: 7))
+    let (db, _, categories) = plan.palmDatabase(categories: CategoryAppInfo(names: ["Unfiled", "Personal"]))
+    #expect(categories.names[2] == "Family")
+    #expect(db.records[0].category == 2)
+}

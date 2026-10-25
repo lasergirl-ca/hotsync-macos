@@ -53,6 +53,19 @@ struct CalendarSyncSection: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    if appState.deviceManager.profile(profileId)?.isCalendarTwoWayDryRun == true {
+                        Toggle(isOn: Binding(
+                            get: { appState.deviceManager.profile(profileId)?.isCalendarTwoWayApply ?? false },
+                            set: { appState.setCalendarTwoWayApply($0, for: profileId) }
+                        )) {
+                            Text(L10n.twoWayApplyToggle)
+                        }
+                        .font(.caption)
+                        Text(L10n.twoWayApplyHint)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 switch accessStatus {

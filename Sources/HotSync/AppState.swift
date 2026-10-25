@@ -615,6 +615,10 @@ final class AppState {
         var twoWayCalendar = false
         /// aus dem syncInfo-Ereignis: welcher PC zuletzt abgeglichen hat
         var lastSyncPC: UInt32 = 0
+        /// der zusammengeführte Kalender, der nach dem Schließen installiert
+        /// wird, und der Spiegel, der danach gespeichert wird
+        var twoWayInstall: URL?
+        var twoWayMirror: SyncMirror?
         var restoreFiles: [URL] = []
         var restoreDone = 0
         var restoreFailed = 0
@@ -722,6 +726,25 @@ final class AppState {
             twoWayPlanned(session)
             session.runner.send("closedb")
         case .dbClosed where session.stage == .twoWayCalendar:
+            if let url = session.twoWayInstall {
+                session.twoWayInstall = nil
+                session.runner.send("install \(url.path)")
+            } else {
+                fixLocations(session)
+            }
+        case .installing where session.stage == .twoWayCalendar:
+            break
+        case .installed where session.stage == .twoWayCalendar:
+            twoWayInstalled(session)
+        case .failed(_, let failure) where session.stage == .twoWayCalendar:
+            if let tabId = session.tabId { tabLog(tabId, L10n.logTwoWayFailed(L10n.failureText(failure))) }
+            session.twoWayMirror = nil
+            fixLocations(session)
+        case .syncInfoWritten where session.stage == .twoWayCalendar:
+            if let tabId = session.tabId { tabLog(tabId, L10n.logTwoWayDone) }
+            fixLocations(session)
+        case .error(let stage, let message) where session.stage == .twoWayCalendar && stage == "syncinfo":
+            if let tabId = session.tabId { tabLog(tabId, L10n.logTwoWayFailed("\(stage): \(message)")) }
             fixLocations(session)
         case .error(let stage, let message) where session.stage == .twoWayCalendar
             && ["opendb", "readappinfo", "readall", "closedb"].contains(stage):
@@ -922,6 +945,13 @@ final class AppState {
     func setCalendarTwoWayDryRun(_ on: Bool, for profileId: UUID) {
         guard var profile = deviceManager.profile(profileId) else { return }
         profile.calendarTwoWayDryRun = on
+        if !on { profile.calendarTwoWayApply = false }
+        deviceManager.updateProfile(profile)
+    }
+
+    func setCalendarTwoWayApply(_ on: Bool, for profileId: UUID) {
+        guard var profile = deviceManager.profile(profileId) else { return }
+        profile.calendarTwoWayApply = on
         deviceManager.updateProfile(profile)
     }
 
@@ -1364,10 +1394,62 @@ final class AppState {
             for line in lines { tabLog(tabId, "  " + line) }
             for line in plan.log.prefix(10) { tabLog(tabId, "  " + line) }
             if !plan.missingCategories.isEmpty { tabLog(tabId, L10n.logTwoWayMissingCategories(plan.missingCategories)) }
-            tabLog(tabId, L10n.logTwoWayDryRunDone)
+
+            guard profile.isCalendarTwoWayApply else {
+                tabLog(tabId, L10n.logTwoWayDryRunDone)
+                return
+            }
+            twoWayApply(plan, mirror: mirror, session: session, profile: profile, settings: settings,
+                        palmCategories: session.calendarAppInfo.flatMap { try? CalendarAppInfo(data: $0) }?.categories ?? CategoryAppInfo(),
+                        startOfWeek: calendar.firstWeekday == 2 ? 1 : 0)
         } catch {
             tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
         }
+    }
+
+    /// Anwenden: die Mac-Seite über EventKit, der Palm bekommt den
+    /// zusammengeführten Kalender als Ganzes (nach dem Schließen installiert),
+    /// danach Spiegel speichern und lastSyncPC setzen.
+    private func twoWayApply(_ plan: SyncPlan, mirror: SyncMirror, session: Session, profile: DeviceProfile,
+                             settings: CalendarSyncSettings, palmCategories: CategoryAppInfo, startOfWeek: UInt8) {
+        guard let tabId = session.tabId else { return }
+        let calendars = settings.calendars
+        let writer = CalendarWriter(store: calendarSource.store, homeZone: .current) { category in
+            let id = calendars.first { ($0.category ?? $0.title) == category }?.id ?? calendars.first?.id
+            return id.flatMap { self.calendarSource.store.calendar(withIdentifier: $0) }
+        }
+        let result = writer.apply(plan)
+        tabLog(tabId, L10n.logTwoWayMacApplied(result.createdKeys.count, result.updated, result.deleted))
+        for failure in result.failures.prefix(10) { tabLog(tabId, L10n.logTwoWayMacFailure(failure)) }
+
+        let (db, palmIDs, _) = plan.palmDatabase(categories: palmCategories, startOfWeek: startOfWeek)
+        session.twoWayMirror = plan.mirror(after: mirror, palmIDs: palmIDs, macKeys: result.createdKeys)
+        let url = deviceManager.profileDirectory(for: profile).appendingPathComponent("Sync")
+            .appendingPathComponent("\(CalendarBuilder.databaseName).pdb")
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try db.encode().write(to: url, options: .atomic)
+            session.twoWayInstall = url
+            tabLog(tabId, L10n.logTwoWayPalmInstalling(db.records.count))
+        } catch {
+            tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
+            session.twoWayMirror = nil
+        }
+    }
+
+    /// Der zusammengeführte Kalender ist auf dem Palm: Spiegel speichern,
+    /// diesen Mac als letzten PC eintragen.
+    private func twoWayInstalled(_ session: Session) {
+        guard let tabId = session.tabId, let profileId = session.profileId, let profile = deviceManager.profile(profileId),
+              let mirror = session.twoWayMirror else { return }
+        do {
+            try mirror.save(to: mirrorURL(for: profile))
+            tabLog(tabId, L10n.logTwoWayMirrorSaved(mirror.entries.count))
+        } catch {
+            tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
+        }
+        session.twoWayMirror = nil
+        session.runner.send("syncinfo \(mirror.pcID)")
     }
 
     /// Die Ortsdatenbanken des Palms (eingebaute und eigene Orte) mit der

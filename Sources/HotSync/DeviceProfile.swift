@@ -24,7 +24,13 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     /// Solange an, wird der Kalender nicht mehr als Ganzes installiert.
     var calendarTwoWayDryRun: Bool?
 
+    /// … und wirklich anwenden: Mac-Änderungen über EventKit, der Palm
+    /// bekommt den zusammengeführten Kalender als Ganzes, der Spiegel wird
+    /// gespeichert. Nur zusammen mit dem Probelauf-Schalter.
+    var calendarTwoWayApply: Bool?
+
     var isCalendarTwoWayDryRun: Bool { calendarTwoWayDryRun ?? false }
+    var isCalendarTwoWayApply: Bool { isCalendarTwoWayDryRun && (calendarTwoWayApply ?? false) }
     /// Die Uhr des Palms bei jedem HotSync vom Mac stellen; nil = an
     var clockSync: Bool?
     /// Die Zeitzonen-Regeln der Orte des Palms aus der tzdata des Macs

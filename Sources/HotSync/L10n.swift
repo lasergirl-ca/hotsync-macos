@@ -568,6 +568,22 @@ enum L10n {
         "Categories the Palm does not have yet: \(names.joined(separator: ", "))"
     ) }
     static var logTwoWayDryRunDone: String { s("Probelauf beendet, nichts geschrieben", "Dry run done, nothing written") }
+    static var twoWayApplyToggle: String { s("… und anwenden (beide Seiten werden geschrieben)", "… and apply (both sides are written)") }
+    static var twoWayApplyHint: String { s(
+        "Erst einschalten, wenn der Probelauf im Log plausibel aussah. Mac-Änderungen gehen über EventKit in Calendar.app (und damit in iCloud/Google); der Palm bekommt den zusammengeführten Kalender als Ganzes; der Spiegel wird gespeichert, der nächste Abgleich ist ein schneller.",
+        "Turn on only once the dry run in the log looked right. Mac changes go through EventKit into Calendar.app (and on to iCloud/Google); the Palm gets the merged calendar whole; the mirror is saved and the next sync is a fast one."
+    ) }
+    static func logTwoWayMacApplied(_ created: Int, _ updated: Int, _ deleted: Int) -> String { s(
+        "Mac: \(created) neu, \(updated) geändert, \(deleted) gelöscht", "Mac: \(created) created, \(updated) updated, \(deleted) deleted"
+    ) }
+    static func logTwoWayMacFailure(_ text: String) -> String { s("Mac, nicht geschrieben: \(text)", "Mac, not written: \(text)") }
+    static func logTwoWayPalmInstalling(_ records: Int) -> String { s(
+        "Palm: der zusammengeführte Kalender (\(records) Einträge) wird installiert …", "Palm: installing the merged calendar (\(records) records) …"
+    ) }
+    static func logTwoWayMirrorSaved(_ entries: Int) -> String { s(
+        "Spiegel gespeichert: \(entries) Einträge", "Mirror saved: \(entries) entries"
+    ) }
+    static var logTwoWayDone: String { s("Abgleich in beide Richtungen fertig; dieser Mac ist als letzter PC eingetragen", "Two-way sync done; this Mac is recorded as the last PC") }
     static func logTwoWayFailed(_ reason: String) -> String { s("Probelauf abgebrochen: \(reason)", "Dry run stopped: \(reason)") }
     static var taskSyncTitle: String { s("Aufgaben: Mac → Palm", "Tasks: Mac → Palm") }
     static var taskSyncToggle: String { s("Aufgaben abgleichen", "Sync Tasks") }
