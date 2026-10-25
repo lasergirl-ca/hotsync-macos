@@ -38,6 +38,7 @@
  *             resetflags              Änderungsmarken löschen (nach dem Abgleich)
  *             cleanup                 gelöschte Datensätze endgültig entfernen
  *             syncinfo <PC-ID>        lastSyncPC und Abgleichzeit im Palm setzen
+ *             settime                 die Uhr des Palms auf die des Macs stellen
  *             end              Sitzung sauber beenden
  *
  * Exit:     0 Sitzung beendet, 1 Fehler, 2 kein Palm innerhalb des Timeouts
@@ -1122,6 +1123,21 @@ static void write_sync_info(int sd, const char *args)
 	emit_end();
 }
 
+/* "settime": die Uhr des Palms auf die Ortszeit des Macs stellen, wie es
+ * der HotSync-Manager tat. libpisock rechnet time_t in die lokale Zeit um. */
+static void set_time(int sd)
+{
+	time_t now = time(NULL);
+
+	if (dlp_SetSysDateTime(sd, now) < 0) {
+		emit_dlp_error(sd, "settime", "cannot set the clock");
+		return;
+	}
+	emit_begin("timeSet");
+	emit_int("date", (long)now);
+	emit_end();
+}
+
 /* Abstand der Lebenszeichen an den Palm, solange keine Anweisung kommt -
  * ohne sie bricht der Palm die Sitzung nach einer Weile ab. */
 #define TICKLE_INTERVAL_MS	5000
@@ -1194,6 +1210,8 @@ static void run_commands(int sd)
 			clean_up(sd);
 		} else if (strncmp(line, "syncinfo ", 9) == 0) {
 			write_sync_info(sd, line + 9);
+		} else if (strcmp(line, "settime") == 0) {
+			set_time(sd);
 		} else if (strncmp(line, "log ", 4) == 0) {
 			char entry[1024];
 			utf8_to_cp1252(line + 4, entry, sizeof(entry));

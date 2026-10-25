@@ -166,6 +166,7 @@ private func imageWithVersion(_ version: String?) -> Data {
     #expect(SessionEvent.parse(#"{"event":"cleanedUp"}"#) == .cleanedUp)
     #expect(SessionEvent.parse(#"{"event":"syncInfoWritten","pcId":305419896,"date":1792368000}"#)
             == .syncInfoWritten(pcId: 0x12345678, date: Date(timeIntervalSince1970: 1_792_368_000)))
+    #expect(SessionEvent.parse(#"{"event":"timeSet","date":1792368000}"#) == .timeSet(Date(timeIntervalSince1970: 1_792_368_000)))
     // a record without its data or id, or with broken base64, is not a record
     #expect(SessionEvent.parse(#"{"event":"record","id":1,"attrs":0}"#) == nil)
     #expect(SessionEvent.parse(#"{"event":"record","id":1,"data":"@@"}"#) == nil)

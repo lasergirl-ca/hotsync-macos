@@ -66,6 +66,8 @@ public enum SessionEvent: Equatable, Sendable {
     case flagsReset
     case cleanedUp
     case syncInfoWritten(pcId: UInt32, date: Date)
+    /// the Palm's clock was set to the Mac's time
+    case timeSet(Date)
 
     private struct Line: Decodable {
         let event: String
@@ -193,6 +195,9 @@ public enum SessionEvent: Equatable, Sendable {
         case "syncInfoWritten":
             guard let pcId = l.pcId, let date = l.date else { return nil }
             return .syncInfoWritten(pcId: pcId, date: Date(timeIntervalSince1970: TimeInterval(date)))
+        case "timeSet":
+            guard let date = l.date else { return nil }
+            return .timeSet(Date(timeIntervalSince1970: TimeInterval(date)))
         default:
             return nil
         }

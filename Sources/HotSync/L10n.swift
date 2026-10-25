@@ -533,6 +533,31 @@ enum L10n {
         "\(name) auf dem Palm: \(records) Datensätze, \(identical) lesbar, \(different) abweichend, \(deleted) gelöscht; Kategorien: \(categories.joined(separator: ", "))",
         "\(name) on the Palm: \(records) records, \(identical) decode, \(different) differ, \(deleted) deleted; categories: \(categories.joined(separator: ", "))"
     ) }
+    static var timeSyncTitle: String { s("Uhr und Zeitzonen", "Clock and time zones") }
+    static var timeSyncToggle: String { s("Uhr und Zeitzonen des Palms nachführen", "Keep the Palm's clock and time zones current") }
+    static var timeSyncHint: String { s(
+        "Bei jedem HotSync wird die Uhr des Palms auf die des Macs gestellt, und seine Orte (Prefs › Datum & Uhrzeit) bekommen die Zeitzonen-Regeln aus der tzdata des Macs – ein Palm OS 5 kennt weder die Regeln von 2007 noch eine Provinz, die die Uhr nicht mehr umstellt. Nach einer Änderung einmal den Heimatort in Prefs antippen, damit die Uhr die neue Regel übernimmt.",
+        "At each HotSync the Palm's clock is set from the Mac's, and its locations (Prefs › Date & Time) get the time zone rules from the Mac's tzdata – a Palm OS 5 knows neither the 2007 rules nor a province that stopped changing clocks. After a change, tap the home location in Prefs once so the clock takes the new rule."
+    ) }
+    static func logTimeSet(_ date: Date) -> String { s(
+        "Uhr des Palms gestellt: \(date.formatted(date: .abbreviated, time: .shortened))",
+        "Palm clock set: \(date.formatted(date: .abbreviated, time: .shortened))"
+    ) }
+    static func logLocationsChecking(_ name: String) -> String { s(
+        "Prüfe die Zeitzonen in \(name) …", "Checking the time zones in \(name) …"
+    ) }
+    static func logLocationFixed(_ change: String) -> String { s("Zeitzone: \(change)", "Time zone: \(change)") }
+    static func logLocationsDone(_ name: String, _ changed: Int, _ total: Int, _ unknown: Int) -> String { s(
+        "\(name): \(changed) von \(total) Orten korrigiert, \(unknown) ohne bekannte Zone",
+        "\(name): \(changed) of \(total) locations corrected, \(unknown) with no known zone"
+    ) }
+    static var logLocationsHint: String { s(
+        "Auf dem Palm: Prefs › Datum & Uhrzeit, den Heimatort einmal antippen, damit die Uhr die neue Regel übernimmt",
+        "On the Palm: Prefs › Date & Time, tap the home location once so the clock takes the new rule"
+    ) }
+    static func logLocationsFailed(_ name: String, _ stage: String, _ message: String) -> String { s(
+        "Zeitzonen in \(name) nicht geändert (\(stage): \(message))", "Time zones in \(name) not changed (\(stage): \(message))"
+    ) }
     static var contactSyncTitle: String { s("Kontakte: Mac → Palm", "Contacts: Mac → Palm") }
     static var contactSyncToggle: String { s("Kontakte abgleichen", "Sync Contacts") }
     static var contactSyncChoose: String { s("Konten wählen", "Choose accounts") }

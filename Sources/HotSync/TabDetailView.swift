@@ -29,6 +29,7 @@ struct TabDetailView: View {
                     }
                     CalendarSyncSection(profileId: tab.profileId)
                     ContactSyncSection(profileId: tab.profileId)
+                    TimeSyncSection(profileId: tab.profileId)
                     if let queue = appState.queue(for: tab) {
                         QueueSection(queue: queue, profileId: tab.profileId,
                                      isSyncing: appState.status(tab.id)?.isSyncing == true)
@@ -733,5 +734,31 @@ struct SyncLogo: View {
         .frame(width: 40, height: 40)
         .onAppear { spinning = isSyncing }
         .onChange(of: isSyncing) { _, now in spinning = now }
+    }
+}
+
+/// Uhr und Zeitzonen: ein Schalter je Profil.
+struct TimeSyncSection: View {
+    @Environment(AppState.self) var appState
+    let profileId: UUID
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle(isOn: Binding(
+                    get: { appState.deviceManager.profile(profileId)?.isTimeSyncOn ?? true },
+                    set: { appState.setTimeSync($0, for: profileId) }
+                )) {
+                    Text(L10n.timeSyncToggle)
+                }
+                Text(L10n.timeSyncHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(4)
+        } label: {
+            Label(L10n.timeSyncTitle, systemImage: "clock")
+        }
     }
 }

@@ -593,13 +593,20 @@ final class AppState {
         var rejection: TabStatus.Rejection?
         /// Ablauf einer angenommenen Sitzung: zurückspielen (falls angefragt),
         /// die Warteschlange installieren, sichern (falls eingeschaltet)
-        enum Stage { case restoring, installing, backingUp, readingCalendar, dumpingROM }
+        enum Stage { case restoring, installing, backingUp, readingCalendar, fixingLocations, dumpingROM }
         var stage: Stage = .installing
         /// nach der Sicherung: diese Datenbanken vom Palm lesen und prüfen
         var checkDatabases: [String] = []
         var checking: String?
         var calendarAppInfo: Data?
         var calendarRecords: [PalmRecordIn] = []
+        /// danach: die Ortsdatenbanken mit der tzdata des Macs abgleichen
+        var fixDatabases: [String] = []
+        var fixing: String?
+        var fixPending = 0
+        var fixChanged = 0
+        var fixTotal = 0
+        var fixUnknown = 0
         var restoreFiles: [URL] = []
         var restoreDone = 0
         var restoreFailed = 0
@@ -811,6 +818,32 @@ final class AppState {
                 session.runner.send("closedb")
             }
 
+        // Zeitzonen: Orte lesen, abweichende neu schreiben, schließen
+        case .timeSet(let date):
+            if let tabId = session.tabId { tabLog(tabId, L10n.logTimeSet(date)) }
+        case .dbOpened where session.stage == .fixingLocations:
+            session.runner.send("readall")
+        case .record(let id, _, let attrs, let category, let data) where session.stage == .fixingLocations:
+            session.calendarRecords.append(PalmRecordIn(id: id, attributes: attrs, category: category, data: data))
+        case .recordsDone where session.stage == .fixingLocations:
+            locationsRead(session)
+        case .recordWritten where session.stage == .fixingLocations:
+            session.fixChanged += 1
+            session.fixPending -= 1
+            if session.fixPending == 0 { locationsDone(session) }
+        case .dbClosed where session.stage == .fixingLocations:
+            fixLocations(session)    // die nächste Datenbank, oder weiter
+        case .error(let stage, let message) where session.stage == .fixingLocations
+            && ["opendb", "readall", "writerec", "closedb"].contains(stage):
+            if let tabId = session.tabId { tabLog(tabId, L10n.logLocationsFailed(session.fixing ?? "", stage, message)) }
+            switch stage {
+            case "opendb", "closedb": fixLocations(session)
+            case "writerec":
+                session.fixPending -= 1
+                if session.fixPending == 0 { locationsDone(session) }
+            default: session.runner.send("closedb")
+            }
+
         case .error(let stage, let message):
             session.errorMessage = "\(stage): \(message)"
             DebugLog.shared.log(L10n.logSessionError(portLabel(port), stage, message), source: "Session")
@@ -831,6 +864,12 @@ final class AppState {
         profile.calendarSync = settings
         deviceManager.updateProfile(profile)
         refreshCalendarPreview(for: profileId)
+    }
+
+    func setTimeSync(_ on: Bool, for profileId: UUID) {
+        guard var profile = deviceManager.profile(profileId) else { return }
+        profile.timeSync = on
+        deviceManager.updateProfile(profile)
     }
 
     func setContactSync(_ settings: ContactSyncSettings, for profileId: UUID) {
@@ -966,6 +1005,11 @@ final class AppState {
         selectedTabId = tabId
 
         let mode = tabStore.tab(tabId)?.hotSyncMode ?? .syncInstallBackup
+        if mode.syncs, deviceManager.profile(profileId)?.isTimeSyncOn == true {
+            // Uhr vom Mac, Zeitzonen nach der Sicherung
+            session.runner.send("settime")
+            session.fixDatabases = ["locLDefLocationDB", "locLCusLocationDB"]
+        }
         if mode.syncs, let profile = deviceManager.profile(profileId) {
             // Erst sichern, dann ersetzen: ohne Sicherung dieses Palms gehen
             // sein eigener Kalender und seine Kontakte nicht verloren
@@ -1101,10 +1145,10 @@ final class AppState {
     }
 
     /// Nach der Sicherung: die abgeglichenen Datenbanken auf dem Palm
-    /// prüfen, eine nach der anderen, dann das ROM.
+    /// prüfen, eine nach der anderen, dann die Zeitzonen, dann das ROM.
     private func afterBackup(_ session: Session) {
         guard !session.checkDatabases.isEmpty, let tabId = session.tabId, let user = session.user else {
-            afterCalendarCheck(session)
+            fixLocations(session)
             return
         }
         let name = session.checkDatabases.removeFirst()
@@ -1149,6 +1193,51 @@ final class AppState {
             categories = []
         }
         tabLog(tabId, L10n.logCalendarChecked(name, session.calendarRecords.count, identical, different, deleted, categories))
+    }
+
+    /// Die Ortsdatenbanken des Palms (eingebaute und eigene Orte) mit der
+    /// tzdata des Macs vergleichen und abweichende Einträge neu schreiben:
+    /// ein Palm OS 5 kennt weder die Regeln von 2007 noch eine Provinz, die
+    /// die Uhr nicht mehr umstellt. Eine Datenbank nach der anderen.
+    private func fixLocations(_ session: Session) {
+        guard !session.fixDatabases.isEmpty, let tabId = session.tabId, let user = session.user else {
+            afterCalendarCheck(session)
+            return
+        }
+        let name = session.fixDatabases.removeFirst()
+        session.fixing = name
+        session.calendarRecords = []
+        session.fixPending = 0
+        session.fixChanged = 0
+        session.fixUnknown = 0
+        session.stage = .fixingLocations
+        statuses[tabId]?.phase = .readingCalendar(user: user, database: name, done: 0)
+        tabLog(tabId, L10n.logLocationsChecking(name))
+        session.runner.send("opendb rw \(name)")
+    }
+
+    /// Die Orte sind gelesen: was von der tzdata abweicht, geht korrigiert
+    /// zurück auf den Palm (gleiche ID, gleiche Kategorie).
+    private func locationsRead(_ session: Session) {
+        guard let tabId = session.tabId else { return }
+        session.fixTotal = session.calendarRecords.count
+        for record in session.calendarRecords where !record.isDeleted && !record.data.isEmpty {
+            guard let location = try? PalmLocation(data: record.data) else { continue }
+            guard TimeZoneFixups.zone(for: location) != nil else { session.fixUnknown += 1; continue }
+            guard let (fixed, change) = TimeZoneFixups.fix(location) else { continue }
+            tabLog(tabId, L10n.logLocationFixed(change))
+            session.fixPending += 1
+            session.runner.send("writerec \(record.id) \(record.attributes & 0x18) \(record.category) \(fixed.encode().base64EncodedString())")
+        }
+        if session.fixPending == 0 { locationsDone(session) }
+    }
+
+    private func locationsDone(_ session: Session) {
+        if let tabId = session.tabId, let name = session.fixing {
+            tabLog(tabId, L10n.logLocationsDone(name, session.fixChanged, session.fixTotal, session.fixUnknown))
+            if session.fixChanged > 0 && name == "locLDefLocationDB" { tabLog(tabId, L10n.logLocationsHint) }
+        }
+        session.runner.send("closedb")
     }
 
     /// Baut ContactsDB-PAdd aus Contacts.app und legt es in die Warteschlange.

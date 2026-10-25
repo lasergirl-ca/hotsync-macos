@@ -17,6 +17,11 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     var calendarSync: CalendarSyncSettings?
     /// Kontakte-Abgleich Mac → Palm: welche Konten; nil = nie eingerichtet
     var contactSync: ContactSyncSettings?
+    /// Uhr des Palms vom Mac stellen und seine Zeitzonen-Regeln aus der
+    /// tzdata des Macs nachführen; nil = an
+    var timeSync: Bool?
+
+    var isTimeSyncOn: Bool { timeSync ?? true }
 
     var palmOS: PalmOSVersion? { romVersion.map(PalmOSVersion.init(rom:)) }
 
