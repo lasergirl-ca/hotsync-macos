@@ -765,6 +765,7 @@ struct TimeSyncSection: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)   // so breit wie die anderen Abschnitte
             .padding(4)
         } label: {
             Label(L10n.timeSyncTitle, systemImage: "clock")
