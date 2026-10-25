@@ -703,6 +703,17 @@ final class AppState {
                 deviceManager.assignIdentity(user, to: profileId)
             }
 
+        // Zeitzonen: die korrigierte Ortsdatenbank wird installiert - vor den
+        // allgemeinen Fällen, sonst zählt sie als Datei der Warteschlange
+        case .installing where session.stage == .fixingLocations:
+            break
+        case .installed(let file, _) where session.stage == .fixingLocations:
+            if let tabId = session.tabId { tabLog(tabId, L10n.logLocationsInstalled(file)) }
+            fixLocations(session)
+        case .failed(let file, let failure) where session.stage == .fixingLocations:
+            if let tabId = session.tabId { tabLog(tabId, L10n.logLocationsFailed(file, "install", L10n.failureText(failure))) }
+            fixLocations(session)
+
         case .installing(let file):
             guard let tabId = session.tabId, let user = session.user else { return }
             if session.stage == .restoring {
@@ -837,14 +848,6 @@ final class AppState {
             } else {
                 fixLocations(session)    // die nächste Datenbank, oder weiter
             }
-        case .installing where session.stage == .fixingLocations:
-            break
-        case .installed(let file, _) where session.stage == .fixingLocations:
-            if let tabId = session.tabId { tabLog(tabId, L10n.logLocationsInstalled(file)) }
-            fixLocations(session)
-        case .failed(let file, let failure) where session.stage == .fixingLocations:
-            if let tabId = session.tabId { tabLog(tabId, L10n.logLocationsFailed(file, "install", L10n.failureText(failure))) }
-            fixLocations(session)
         case .error(let stage, let message) where session.stage == .fixingLocations
             && ["opendb", "readall", "closedb"].contains(stage):
             if let tabId = session.tabId { tabLog(tabId, L10n.logLocationsFailed(session.fixing ?? "", stage, message)) }
