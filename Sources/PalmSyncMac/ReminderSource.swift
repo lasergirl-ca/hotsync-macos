@@ -88,7 +88,7 @@ public final class ReminderSource: @unchecked Sendable {
 
         return MacReminder(
             id: r.calendarItemIdentifier,
-            listID: r.calendar.calendarIdentifier,
+            listID: r.calendar?.calendarIdentifier ?? "",   // nil on a reminder not yet in a list
             title: r.title ?? "",
             notes: r.notes,
             url: r.url,

@@ -217,7 +217,7 @@ public struct ContactsBuilder {
         return (db, report)
     }
 
-    private func dropDuplicates(_ contacts: [MacContact], _ report: inout Report) -> [MacContact] {
+    func dropDuplicates(_ contacts: [MacContact], _ report: inout Report) -> [MacContact] {
         let priority = Dictionary(uniqueKeysWithValues: options.containers.enumerated().map { ($1.id, $0) })
         var best: [String: MacContact] = [:]
         var order: [String] = []
