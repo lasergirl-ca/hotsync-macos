@@ -1,0 +1,180 @@
+import EventKit
+import Foundation
+import PalmSync
+
+/// Applies the Mac side of a calendar sync plan to Calendar.app: the shared
+/// fields of a SyncedEvent go into an EKEvent (new or existing), rules
+/// become EKRecurrenceRules, exceptions remove occurrences. The mapping is
+/// a set of static functions, tested without saving; `apply` does the
+/// saving and returns the keys of what it created.
+public struct CalendarWriter {
+    public struct Result: Equatable, Sendable {
+        /// Entry index of each create in the plan → the key the Mac gave it.
+        public var createdKeys: [Int: MacKey] = [:]
+        public var updated = 0
+        public var deleted = 0
+        public var failures: [String] = []
+    }
+
+    public let store: EKEventStore
+    public let homeZone: TimeZone
+    /// Which Mac calendar a Palm category name goes to (the first chosen
+    /// calendar with that category).
+    public let calendarForCategory: (String) -> EKCalendar?
+    private let calendar: Calendar
+
+    public init(store: EKEventStore, homeZone: TimeZone = .current, calendarForCategory: @escaping (String) -> EKCalendar?) {
+        self.store = store
+        self.homeZone = homeZone
+        self.calendarForCategory = calendarForCategory
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = homeZone
+        calendar = c
+    }
+
+    // MARK: Mapping
+
+    public static func date(_ d: PalmDate, _ t: PalmTime?, in calendar: Calendar) -> Date {
+        calendar.date(from: DateComponents(year: d.year, month: d.month, day: d.day, hour: t?.hour ?? 0, minute: t?.minute ?? 0))!
+    }
+
+    /// Writes the shared fields into the event. Fields the Palm has no say
+    /// in (attendees, URL, travel time, …) are left alone.
+    public static func fill(_ ek: EKEvent, from event: SyncedEvent, in calendar: Calendar) {
+        ek.title = event.title ?? ""
+        ek.notes = event.note
+        ek.location = event.location
+        ek.timeZone = calendar.timeZone
+        if let time = event.time {
+            ek.isAllDay = false
+            ek.startDate = date(event.date, time.start, in: calendar)
+            var end = date(event.date, time.end, in: calendar)
+            if end < ek.startDate { end = ek.startDate }
+            ek.endDate = end
+        } else {
+            ek.isAllDay = true
+            ek.startDate = date(event.date, nil, in: calendar)
+            ek.endDate = calendar.date(byAdding: DateComponents(day: 1, second: -1), to: ek.startDate)!
+        }
+
+        ek.alarms = nil
+        if let alarm = event.alarm {
+            let seconds: TimeInterval
+            switch alarm.unit {
+            case .minutes: seconds = TimeInterval(alarm.advance) * 60
+            case .hours: seconds = TimeInterval(alarm.advance) * 3600
+            case .days: seconds = TimeInterval(alarm.advance) * 86400
+            }
+            ek.addAlarm(EKAlarm(relativeOffset: -seconds))
+        }
+
+        if let existing = ek.recurrenceRules { for rule in existing { ek.removeRecurrenceRule(rule) } }
+        if let rule = event.repeatRule {
+            ek.addRecurrenceRule(recurrenceRule(rule, start: event.date, in: calendar))
+        }
+    }
+
+    /// The EventKit rule for a Palm rule.
+    public static func recurrenceRule(_ rule: CalendarEvent.Repeat, start: PalmDate, in calendar: Calendar) -> EKRecurrenceRule {
+        let end = rule.endDate.map { EKRecurrenceEnd(end: date($0, PalmTime(hour: 23, minute: 59), in: calendar)) }
+        let interval = max(1, Int(rule.frequency))
+        switch rule.type {
+        case .daily:
+            return EKRecurrenceRule(recurrenceWith: .daily, interval: interval, end: end)
+        case .weekly:
+            let mask = rule.weekdays.isEmpty ? CalendarEvent.Weekdays(rawValue: 1 << UInt8(start.weekday)) : rule.weekdays
+            let days = (0..<7).filter { mask.rawValue & (1 << $0) != 0 }
+                .map { EKRecurrenceDayOfWeek(EKWeekday(rawValue: $0 + 1)!) }
+            return EKRecurrenceRule(recurrenceWith: .weekly, interval: interval, daysOfTheWeek: days, daysOfTheMonth: nil,
+                                    monthsOfTheYear: nil, weeksOfTheYear: nil, daysOfTheYear: nil, setPositions: nil, end: end)
+        case .monthlyByDate:
+            return EKRecurrenceRule(recurrenceWith: .monthly, interval: interval, daysOfTheWeek: nil,
+                                    daysOfTheMonth: [NSNumber(value: start.day)], monthsOfTheYear: nil, weeksOfTheYear: nil,
+                                    daysOfTheYear: nil, setPositions: nil, end: end)
+        case .monthlyByDay:
+            let week = Int(rule.on) / 7, weekday = Int(rule.on) % 7
+            let day = EKRecurrenceDayOfWeek(EKWeekday(rawValue: weekday + 1)!, weekNumber: week >= 4 ? -1 : week + 1)
+            return EKRecurrenceRule(recurrenceWith: .monthly, interval: interval, daysOfTheWeek: [day], daysOfTheMonth: nil,
+                                    monthsOfTheYear: nil, weeksOfTheYear: nil, daysOfTheYear: nil, setPositions: nil, end: end)
+        case .yearly:
+            return EKRecurrenceRule(recurrenceWith: .yearly, interval: interval, end: end)
+        }
+    }
+
+    // MARK: Applying
+
+    /// Applies the plan's Mac changes: creates, updates, deletes, in that
+    /// order. A failure is recorded and the rest goes on.
+    public func apply(_ plan: SyncPlan) -> Result {
+        var result = Result()
+
+        for change in plan.macCreates {
+            guard let target = calendarForCategory(change.event.category) ?? store.defaultCalendarForNewEvents else {
+                result.failures.append("\(change.event.title ?? "?"): no calendar for category \(change.event.category)")
+                continue
+            }
+            let ek = EKEvent(eventStore: store)
+            ek.calendar = target
+            Self.fill(ek, from: change.event, in: calendar)
+            do {
+                try store.save(ek, span: .futureEvents, commit: true)
+                removeExceptions(of: ek, change.event.exceptions)
+                result.createdKeys[change.entry] = MacKey(seriesID: ek.calendarItemIdentifier)
+            } catch {
+                result.failures.append("\(change.event.title ?? "?"): \(error.localizedDescription)")
+            }
+        }
+
+        for change in plan.macUpdates {
+            guard let key = change.key, let ek = find(key) else {
+                result.failures.append("\(change.event.title ?? "?"): not found on the Mac any more")
+                continue
+            }
+            Self.fill(ek, from: change.event, in: calendar)
+            if let target = calendarForCategory(change.event.category), target != ek.calendar { ek.calendar = target }
+            do {
+                try store.save(ek, span: key.occurrence == nil ? .futureEvents : .thisEvent, commit: true)
+                if key.occurrence == nil { removeExceptions(of: ek, change.event.exceptions) }
+                result.updated += 1
+            } catch {
+                result.failures.append("\(change.event.title ?? "?"): \(error.localizedDescription)")
+            }
+        }
+
+        for key in plan.macDeletes {
+            guard let ek = find(key) else { continue }   // already gone: fine
+            do {
+                try store.remove(ek, span: key.occurrence == nil ? .futureEvents : .thisEvent, commit: true)
+                result.deleted += 1
+            } catch {
+                result.failures.append("\(ek.title ?? "?"): \(error.localizedDescription)")
+            }
+        }
+        return result
+    }
+
+    /// The event (or the one occurrence) a key names.
+    public func find(_ key: MacKey) -> EKEvent? {
+        guard let item = store.calendarItem(withIdentifier: key.seriesID) as? EKEvent else { return nil }
+        guard let occurrence = key.occurrence else { return item }
+        let day = calendar.startOfDay(for: occurrence)
+        let predicate = store.predicateForEvents(withStart: day.addingTimeInterval(-86400), end: day.addingTimeInterval(2 * 86400),
+                                                 calendars: [item.calendar])
+        return store.events(matching: predicate).first {
+            $0.calendarItemIdentifier == key.seriesID && $0.occurrenceDate == occurrence
+        }
+    }
+
+    /// The Palm's exception dates: those occurrences disappear from the Mac.
+    private func removeExceptions(of master: EKEvent, _ exceptions: [PalmDate]) {
+        guard !exceptions.isEmpty else { return }
+        for date in exceptions {
+            let day = Self.date(date, nil, in: calendar)
+            let predicate = store.predicateForEvents(withStart: day, end: calendar.date(byAdding: .day, value: 1, to: day)!,
+                                                     calendars: [master.calendar])
+            for occurrence in store.events(matching: predicate) where occurrence.calendarItemIdentifier == master.calendarItemIdentifier {
+                try? store.remove(occurrence, span: .thisEvent, commit: true)
+            }
+        }
+    }
+}
