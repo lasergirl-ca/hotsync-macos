@@ -31,6 +31,18 @@ final class AppState {
     private(set) var notices: [PortNotice] = []
     /// Der offene Dialog "Neuer Palm" (höchstens einer zur Zeit)
     var newPalmPrompt: NewPalmPrompt?
+    /// Konflikte, die der Benutzer entscheidet, während der Palm wartet
+    var conflictPrompt: ConflictPrompt?
+    @ObservationIgnored private var conflictAnswer: (([ConflictPolicy]?) -> Void)?
+
+    /// Die Antwort aus dem Konflikt-Dialog: eine Wahl je Konflikt, nil = diesen
+    /// Abgleich auslassen.
+    func answerConflicts(_ choices: [ConflictPolicy]?) {
+        let answer = conflictAnswer
+        conflictAnswer = nil
+        conflictPrompt = nil
+        answer?(choices)
+    }
     /// Holt das Fenster nach vorn, wenn HotSync etwas fragen muss
     @ObservationIgnored var onAttentionNeeded: (() -> Void)?
     private(set) var activeChain: ActiveChain?
@@ -833,8 +845,7 @@ final class AppState {
                 }
                 session.runner.send("closedb")
             } else {
-                twoWayPlanned(session)
-                if session.twoWayCurrent != TasksBuilder.databaseName { session.runner.send("closedb") }
+                twoWayPlanned(session)   // schließt die Datenbank selbst, wenn es so weit ist
             }
         case .dbClosed where session.stage == .twoWayCalendar:
             if let url = session.twoWayInstall {
@@ -1623,7 +1634,10 @@ final class AppState {
 
     /// Die Datenbank ist gelesen: Mac-Seite holen, planen, berichten, anwenden.
     private func twoWayPlanned(_ session: Session) {
-        guard let profileId = session.profileId, let profile = deviceManager.profile(profileId) else { return }
+        guard let profileId = session.profileId, let profile = deviceManager.profile(profileId) else {
+            session.runner.send("closedb")
+            return
+        }
         switch session.twoWayCurrent {
         case ContactsBuilder.databaseName: twoWayContacts(session, profile: profile)
         case TasksBuilder.databaseName: twoWayTasks(session, profile: profile)
@@ -1637,10 +1651,14 @@ final class AppState {
     private func twoWayRun<Item: SyncedItem>(
         _ session: Session, profile: DeviceProfile, what: String, mirrorFile: String, engine given: SyncEngine<Item>,
         palmCategories: [String], mac: [MacSyncItem<Item>],
-        titleOf: (Data) -> String?,
+        titleOf: @escaping (Data) -> String?,
         applyMac: @escaping (SyncPlan<Item>) -> (createdKeys: [Int: MacKey], updated: Int, deleted: Int, failures: [String], failedEntries: [Int]),
-        palmDatabase: (SyncPlan<Item>) -> (database: PalmDatabase, palmIDs: [Int: UInt32])
+        palmDatabase: @escaping (SyncPlan<Item>) -> (database: PalmDatabase, palmIDs: [Int: UInt32]),
+        completion: @escaping () -> Void
     ) {
+        // wer fragt, ruft completion später selbst; alle anderen Wege hier
+        var asked = false
+        defer { if !asked { completion() } }
         guard let tabId = session.tabId else { return }
         let url = mirrorURL(mirrorFile, for: profile)
         let pcID = syncPCID(for: profile, session: session)
@@ -1672,27 +1690,83 @@ final class AppState {
         if !fast, !mirror.entries.isEmpty { tabLog(tabId, L10n.logTwoWayDeletesUntrusted(what)) }
         let bases = Dictionary(mirror.entries.map { ($0.palmID, $0.base) }, uniquingKeysWith: { a, _ in a })
         let palm = PalmSnapshot.all(session.calendarRecords)   // es wird immer alles gelesen
-        do {
-            let plan = try engine.plan(palm: palm, palmCategories: palmCategories, mac: mac, mirror: mirror)
+
+        func report(_ plan: SyncPlan<Item>, policy: ConflictPolicy) {
             tabLog(tabId, L10n.logTwoWaySummary(what, toPalm: plan.palmWrites.count, palmDeletes: plan.palmDeletes.count + plan.agedOut.count,
                                                 toMac: plan.macCreates.count + plan.macUpdates.count, macDeletes: plan.macDeletes.count,
-                                                conflicts: plan.conflicts.count, policy: engine.conflictPolicy))
+                                                conflicts: plan.conflicts.count, policy: policy))
             var lines: [String] = []
             for w in plan.palmWrites.prefix(10) { lines.append(L10n.logTwoWayToPalm(titleOf(w.record) ?? "?", new: w.id == nil)) }
             for c in plan.macCreates.prefix(10) { lines.append(L10n.logTwoWayToMac(c.item.title ?? "?", new: true)) }
             for c in plan.macUpdates.prefix(10) { lines.append(L10n.logTwoWayToMac(c.item.title ?? "?", new: false)) }
             for conflict in plan.conflicts.prefix(10) {
                 lines.append(L10n.logTwoWayConflict(conflict.title, conflict.field, conflict.palmValue, conflict.macValue,
-                                                    policy: engine.conflictPolicy))
+                                                    policy: policy == .ask ? .ask : conflict.resolution))
             }
             for line in lines { tabLog(tabId, "  " + line) }
             for line in plan.log.prefix(10) { tabLog(tabId, "  " + line) }
             if !plan.missingCategories.isEmpty { tabLog(tabId, L10n.logTwoWayMissingCategories(plan.missingCategories)) }
+        }
 
-            guard !profile.isDryRun else {
-                tabLog(tabId, L10n.logTwoWayDryRunDone)
-                return
+        let firstPlan: SyncPlan<Item>
+        do {
+            firstPlan = try engine.plan(palm: palm, palmCategories: palmCategories, mac: mac, mirror: mirror)
+        } catch {
+            tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
+            return
+        }
+        report(firstPlan, policy: engine.conflictPolicy)
+
+        guard !profile.isDryRun else {
+            tabLog(tabId, L10n.logTwoWayDryRunDone)
+            return
+        }
+
+        // "Fragen": der Palm wartet (das Werkzeug hält ihn wach), der Benutzer
+        // entscheidet jeden Konflikt, dann wird mit den Antworten neu geplant
+        if engine.conflictPolicy == .ask, !firstPlan.conflicts.isEmpty, let user = session.user {
+            asked = true
+            session.watchdog?.cancel()   // kein Ereignis, solange gefragt wird
+            tabLog(tabId, L10n.logTwoWayAsking(what, firstPlan.conflicts.count))
+            conflictPrompt = ConflictPrompt(what: what, palmName: user.name, conflicts: firstPlan.conflicts, sessionToken: session.token)
+            onAttentionNeeded?()
+            conflictAnswer = { [weak self, weak session] choices in
+                guard let self, let session else { return }
+                defer { completion() }
+                guard let choices else {
+                    self.tabLog(tabId, L10n.logTwoWaySkippedByUser(what))
+                    return
+                }
+                var decided = engine
+                decided.resolve = { i, _ in i < choices.count ? choices[i] : .macWins }
+                do {
+                    let plan = try decided.plan(palm: palm, palmCategories: palmCategories, mac: mac, mirror: mirror)
+                    self.tabLog(tabId, L10n.logTwoWayAnswered(what, mac: choices.filter { $0 == .macWins }.count,
+                                                              palm: choices.filter { $0 == .palmWins }.count,
+                                                              both: choices.filter { $0 == .keepBoth }.count))
+                    report(plan, policy: .ask)
+                    self.twoWayProceed(plan, session: session, profile: profile, what: what, mirror: mirror, mirrorURL: url, bases: bases,
+                                       applyMac: applyMac, palmDatabase: palmDatabase)
+                } catch {
+                    self.tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
+                }
             }
+            return
+        }
+        twoWayProceed(firstPlan, session: session, profile: profile, what: what, mirror: mirror, mirrorURL: url, bases: bases,
+                      applyMac: applyMac, palmDatabase: palmDatabase)
+    }
+
+    /// Der Plan steht: Massenlöschungen prüfen, den Palm, dann den Mac, dann
+    /// den Spiegel.
+    private func twoWayProceed<Item: SyncedItem>(
+        _ plan: SyncPlan<Item>, session: Session, profile: DeviceProfile, what: String, mirror: SyncMirror<Item>, mirrorURL url: URL,
+        bases: [UInt32: Item],
+        applyMac: @escaping (SyncPlan<Item>) -> (createdKeys: [Int: MacKey], updated: Int, deleted: Int, failures: [String], failedEntries: [Int]),
+        palmDatabase: (SyncPlan<Item>) -> (database: PalmDatabase, palmIDs: [Int: UInt32])
+    ) {
+        guard let tabId = session.tabId else { return }
+        do {
             // Viele Löschungen auf einmal sind eher ein Fehler (leere Quelle,
             // falsche Datenbank) als Absicht: nur mit ausdrücklicher Erlaubnis
             if let mass = plan.massDeletion(mirrorEntries: mirror.entries.count) {
@@ -1751,9 +1825,13 @@ final class AppState {
     }
 
     private func twoWayCalendar(_ session: Session, profile: DeviceProfile) {
-        guard let tabId = session.tabId, let settings = profile.calendarSync else { return }
+        guard let tabId = session.tabId, let settings = profile.calendarSync else {
+            session.runner.send("closedb")
+            return
+        }
         guard calendarSource.hasAccess else {
             tabLog(tabId, L10n.logCalendarNoAccess)
+            session.runner.send("closedb")
             return
         }
         let appInfo = session.calendarAppInfo.flatMap { try? CalendarAppInfo(data: $0) }
@@ -1765,6 +1843,7 @@ final class AppState {
         let events: [MacEvent]
         do { events = try calendarSource.events(from: windowStart, to: windowEnd, calendarIDs: settings.calendars.map(\.id)) } catch {
             tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
+            session.runner.send("closedb")
             return
         }
         let builder = CalendarBuilder(options: .init(homeZone: .current, windowStart: windowStart, windowEnd: windowEnd,
@@ -1793,23 +1872,30 @@ final class AppState {
                   palmDatabase: { plan in
                       let (db, ids, _) = plan.palmDatabase(categories: appInfo?.categories ?? CategoryAppInfo(), startOfWeek: startOfWeek)
                       return (db, ids)
-                  })
+                  },
+                  completion: { session.runner.send("closedb") })
     }
 
     private func twoWayContacts(_ session: Session, profile: DeviceProfile) {
-        guard let tabId = session.tabId, let settings = profile.contactSync else { return }
+        guard let tabId = session.tabId, let settings = profile.contactSync else {
+            session.runner.send("closedb")
+            return
+        }
         guard contactSource.hasAccess else {
             tabLog(tabId, L10n.logContactsNoAccess)
+            session.runner.send("closedb")
             return
         }
         guard let appInfoData = session.calendarAppInfo, let appInfo = try? ContactAppInfo(data: appInfoData) else {
             tabLog(tabId, L10n.logTwoWayFailed("ContactsDB-PAdd: AppInfo"))
+            session.runner.send("closedb")
             return
         }
         let containers = settings.containers.map(\.id)
         let macContacts: [MacContact]
         do { macContacts = try contactSource.contacts(in: containers) } catch {
             tabLog(tabId, L10n.logContactsFailed(error.localizedDescription))
+            session.runner.send("closedb")
             return
         }
         let builder = ContactsBuilder(options: .init(containers: settings.containers.map { .init(id: $0.id, title: $0.title) }))
@@ -1831,7 +1917,8 @@ final class AppState {
                   palmDatabase: { plan in
                       let (db, ids, _) = plan.palmDatabase(appInfo: appInfo)
                       return (db, ids)
-                  })
+                  },
+                  completion: { session.runner.send("closedb") })
     }
 
     private func twoWayTasks(_ session: Session, profile: DeviceProfile) {
@@ -1884,8 +1971,8 @@ final class AppState {
                            palmDatabase: { plan in
                                let (db, ids, _) = plan.palmDatabase(appInfo: appInfo)
                                return (db, ids)
-                           })
-            session.runner.send("closedb")
+                           },
+                           completion: { session.runner.send("closedb") })
         }
     }
 
@@ -2096,6 +2183,12 @@ final class AppState {
         }
         let now = Date()
 
+        if conflictPrompt?.sessionToken == session.token {
+            // der Palm ist weg, bevor die Konflikte entschieden waren
+            conflictPrompt = nil
+            conflictAnswer = nil
+            if let tabId = session.tabId { tabLog(tabId, L10n.logTwoWayAskAbandoned) }
+        }
         // Der Palm ist weg, bevor der Benutzer im Dialog geantwortet hat
         if session.awaitingDecision, let user = session.user {
             if newPalmPrompt?.sessionToken == session.token {

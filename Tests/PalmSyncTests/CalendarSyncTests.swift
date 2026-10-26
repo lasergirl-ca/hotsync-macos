@@ -419,3 +419,31 @@ private func syncedMirror() -> CalendarMirror {
     #expect(Set(db.records.map(\.uniqueID)).count == db.records.count)
     #expect(palmIDs.values.allSatisfy { $0 > 0x1009 } && db.uniqueIDSeed > 0x100A)
 }
+
+// MARK: - Ask
+
+@Test func askPolicyTakesTheAnswerPerConflict() throws {
+    // first pass without answers: the Mac wins meanwhile, the conflict is listed
+    var asking = engine
+    asking.conflictPolicy = .ask
+    let palmEdit = palmRecord(id: 0x1001, "Standup (Palm)", standupDate, attributes: 0x40)
+    let mac = items([macEvent("Standup (Mac)", standupStart, series: "Standup")])
+    let first = try asking.plan(palm: .modified([palmEdit]), palmCategories: palmCategories, mac: mac, mirror: syncedMirror())
+    #expect(first.conflicts.count == 1 && first.conflicts[0].resolution == .macWins)
+    #expect(event(first.palmWrites[0].record).title == "Standup (Mac)")
+
+    // the answers: the same questions come in the same order
+    var answered = asking
+    answered.resolve = { i, conflict in
+        #expect(i == 0 && conflict.field == "title")
+        return .palmWins
+    }
+    let plan = try answered.plan(palm: .modified([palmEdit]), palmCategories: palmCategories, mac: mac, mirror: syncedMirror())
+    #expect(plan.conflicts[0].resolution == .palmWins)
+    #expect(plan.palmWrites.isEmpty && plan.macUpdates[0].item.title == "Standup (Palm)")
+
+    var both = asking
+    both.resolve = { _, _ in .keepBoth }
+    let kept = try both.plan(palm: .modified([palmEdit]), palmCategories: palmCategories, mac: mac, mirror: syncedMirror())
+    #expect(kept.conflicts[0].resolution == .keepBoth && kept.macCreates.count == 1)
+}

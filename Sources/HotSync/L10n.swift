@@ -613,6 +613,30 @@ enum L10n {
         "\(what): der Spiegel \(file) lässt sich nicht lesen (\(reason)) – Abgleich ausgelassen; Datei prüfen oder beiseitelegen, dann paart der nächste HotSync nach Inhalt",
         "\(what): the mirror \(file) cannot be read (\(reason)) – sync skipped; check or set the file aside, then the next HotSync pairs by content"
     ) }
+    static func logTwoWayAsking(_ what: String, _ count: Int) -> String { s(
+        "\(what): \(count) Konflikte – der Palm wartet auf die Entscheidung", "\(what): \(count) conflicts – the Palm waits for the decision"
+    ) }
+    static func logTwoWayAnswered(_ what: String, mac: Int, palm: Int, both: Int) -> String { s(
+        "\(what): entschieden – \(mac)× Mac, \(palm)× Palm, \(both)× beide", "\(what): decided – \(mac)× Mac, \(palm)× Palm, \(both)× both"
+    ) }
+    static func logTwoWaySkippedByUser(_ what: String) -> String { s(
+        "\(what): Abgleich ausgelassen, wie im Dialog gewählt", "\(what): sync skipped, as chosen in the dialog"
+    ) }
+    static var logTwoWayAskAbandoned: String { s(
+        "Der Palm ist weg, bevor die Konflikte entschieden waren: nichts geschrieben", "The Palm left before the conflicts were decided: nothing written"
+    ) }
+    static func conflictAskTitle(_ what: String, _ palm: String) -> String { s("Konflikte: \(what) · \(palm)", "Conflicts: \(what) · \(palm)") }
+    static var conflictAskHint: String { s(
+        "Beide Seiten haben dasselbe Feld verschieden geändert. Der Palm wartet, bis entschieden ist; „Auslassen“ lässt diesen Abgleich für heute aus, auf keiner Seite wird etwas geschrieben.",
+        "Both sides changed the same field differently. The Palm waits until this is decided; “Skip” leaves this sync out for today, nothing is written on either side."
+    ) }
+    static var conflictAskMac: String { s("Mac", "Mac") }
+    static var conflictAskPalm: String { s("Palm", "Palm") }
+    static var conflictAskBoth: String { s("Beide", "Both") }
+    static var conflictAskAllMac: String { s("Überall Mac", "Mac for all") }
+    static var conflictAskAllPalm: String { s("Überall Palm", "Palm for all") }
+    static var conflictAskSkip: String { s("Auslassen", "Skip") }
+    static var conflictAskApply: String { s("Anwenden", "Apply") }
     static var logDryRun: String { s("Probelauf: die Abgleiche schreiben nichts", "Dry run: the syncs write nothing") }
     static var logDryRunClock: String { s("Probelauf: die Uhr des Palms würde gestellt werden", "Dry run: the Palm's clock would be set") }
     static func logDryRunWouldInstall(_ name: String, _ records: Int, _ bytes: Int) -> String { s(
@@ -654,6 +678,7 @@ enum L10n {
         case .macWins: return s("Mac gewinnt", "Mac wins")
         case .palmWins: return s("Palm gewinnt", "Palm wins")
         case .keepBoth: return s("beide behalten", "keep both")
+        case .ask: return s("fragen", "ask")
         }
     }
     static var conflictPolicyHelp: String { s(

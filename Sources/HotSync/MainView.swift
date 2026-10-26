@@ -48,6 +48,14 @@ struct MainView: View {
             TabEditorView(tab: tab)
                 .environment(appState)
         }
+        // Konflikte entscheiden, während der Palm wartet; Schließen heißt auslassen
+        .sheet(item: Binding(
+            get: { appState.conflictPrompt },
+            set: { if $0 == nil, appState.conflictPrompt != nil { appState.answerConflicts(nil) } }
+        )) { prompt in
+            ConflictSheet(prompt: prompt)
+                .environment(appState)
+        }
         .sheet(isPresented: Binding(
             get: { appState.showDeviceList },
             set: { appState.showDeviceList = $0 }

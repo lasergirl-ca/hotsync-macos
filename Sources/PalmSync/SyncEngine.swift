@@ -98,6 +98,9 @@ public enum ConflictPolicy: String, Codable, CaseIterable, Sendable {
     /// the Mac's value in the item, and the Palm's version becomes a second
     /// item on both sides, as the Palm Desktop did; nothing is lost
     case keepBoth
+    /// the user decides each one while the Palm waits (the engine's
+    /// `resolve` answers; without it, the Mac wins for the first pass)
+    case ask
 }
 
 public struct SyncConflict: Equatable, Sendable {
@@ -107,6 +110,8 @@ public struct SyncConflict: Equatable, Sendable {
     public var field: String
     public var palmValue: String
     public var macValue: String
+    /// What was done about it: macWins, palmWins or keepBoth.
+    public var resolution: ConflictPolicy = .macWins
 }
 
 /// What one sync has to do, decided before anything is written: the Palm
@@ -270,6 +275,10 @@ public struct SyncEngine<Item: SyncedItem> {
     enum Side { case same, changed(Item), deleted, archived, missing }
 
     public var conflictPolicy: ConflictPolicy
+    /// With `conflictPolicy == .ask`: the answer for the n-th conflict of
+    /// the plan (conflicts come in a fixed order, so a second plan with the
+    /// same input asks the same questions). nil: the Mac wins meanwhile.
+    public var resolve: (@Sendable (Int, SyncConflict) -> ConflictPolicy)?
     /// Whether a mirrored record absent from the Palm means the user deleted
     /// it there. False after a hard reset, a sync with another PC, or an
     /// interrupted install (`lastSyncPC` is not ours): then, as HotSync
@@ -445,10 +454,9 @@ public struct SyncEngine<Item: SyncedItem> {
                     writePalm(macVersion, id: entry.palmID, over: palmBytes, mac: entry.mac, macOwned: true, secret: secret)
                     break
                 }
-                let before = plan.conflicts.count
-                let merged = Self.merge(base: base, palm: palmVersion, mac: macVersion, palmID: entry.palmID, mac: entry.mac,
-                                        policy: conflictPolicy, conflicts: &plan.conflicts)
-                if conflictPolicy == .keepBoth && plan.conflicts.count > before {
+                let (merged, keptBoth) = Self.merge(base: base, palm: palmVersion, mac: macVersion, palmID: entry.palmID, mac: entry.mac,
+                                                    policy: conflictPolicy, resolve: resolve, conflicts: &plan.conflicts)
+                if keptBoth {
                     // the Palm's version lives on as a second item on both sides
                     plan.log.append("\(palmVersion.title ?? "?"): conflict, the Palm's version is kept as a second item")
                     writePalm(palmVersion, id: nil, over: palmBytes, mac: nil, macOwned: false, secret: secret)
@@ -488,8 +496,8 @@ public struct SyncEngine<Item: SyncedItem> {
                     let secret = record.attributes & PalmDatabase.Record.secret != 0
                     // no common ancestor: the Palm's version stands in for it,
                     // so every difference is a Mac change
-                    let merged = Self.merge(base: palmVersion, palm: palmVersion, mac: candidate, palmID: record.id, mac: macItem.key,
-                                            policy: conflictPolicy, conflicts: &plan.conflicts)
+                    let (merged, _) = Self.merge(base: palmVersion, palm: palmVersion, mac: candidate, palmID: record.id, mac: macItem.key,
+                                                 policy: conflictPolicy, resolve: resolve, conflicts: &plan.conflicts)
                     if merged != palmVersion {
                         writePalm(merged, id: record.id, over: record.data, mac: macItem.key, macOwned: macItem.macOwned, secret: secret)
                     } else {
@@ -525,10 +533,13 @@ public struct SyncEngine<Item: SyncedItem> {
     }
 
     /// Field by field against the base; a field both changed goes to the
-    /// policy's side (keep both: the Mac's, the caller duplicates the item).
+    /// policy's side (keep both: the Mac's, and `keptBoth` tells the caller
+    /// to duplicate the item). With `.ask`, `resolve` answers per conflict.
     static func merge(base: Item, palm: Item, mac: Item, palmID: UInt32?, mac key: MacKey?,
-                      policy: ConflictPolicy = .macWins, conflicts: inout [SyncConflict]) -> Item {
+                      policy: ConflictPolicy = .macWins, resolve: ((Int, SyncConflict) -> ConflictPolicy)? = nil,
+                      conflicts: inout [SyncConflict]) -> (Item, keptBoth: Bool) {
         var merged = base
+        var keptBoth = false
         for field in Item.Field.allCases {
             let palmChanged = palm.differs(from: base, in: field)
             let macChanged = mac.differs(from: base, in: field)
@@ -537,13 +548,21 @@ public struct SyncEngine<Item: SyncedItem> {
             case (true, false): merged.set(field, from: palm)
             case (false, true): merged.set(field, from: mac)
             case (true, true):
-                merged.set(field, from: policy == .palmWins ? palm : mac)
-                if palm.differs(from: mac, in: field) {
-                    conflicts.append(SyncConflict(palmID: palmID, mac: key, title: mac.title ?? palm.title ?? "",
-                                                  field: field.rawValue, palmValue: palm.describe(field), macValue: mac.describe(field)))
+                guard palm.differs(from: mac, in: field) else {
+                    merged.set(field, from: mac)   // both changed it the same way
+                    break
                 }
+                var conflict = SyncConflict(palmID: palmID, mac: key, title: mac.title ?? palm.title ?? "",
+                                            field: field.rawValue, palmValue: palm.describe(field), macValue: mac.describe(field))
+                var choice = policy
+                if policy == .ask { choice = resolve?(conflicts.count, conflict) ?? .macWins }
+                if choice == .ask { choice = .macWins }
+                conflict.resolution = choice
+                merged.set(field, from: choice == .palmWins ? palm : mac)
+                if choice == .keepBoth { keptBoth = true }
+                conflicts.append(conflict)
             }
         }
-        return merged
+        return (merged, keptBoth)
     }
 }

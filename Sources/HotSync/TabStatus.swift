@@ -1,4 +1,5 @@
 import Foundation
+import PalmSync
 import HotSyncCore
 import Observation
 
@@ -105,6 +106,17 @@ struct PortNotice: Identifiable, Equatable {
     let port: String
     let kind: Kind
     let date: Date
+}
+
+/// Konflikte eines Abgleichs, die der Benutzer entscheidet, während der Palm
+/// in der Sitzung wartet.
+struct ConflictPrompt: Identifiable, Equatable {
+    let id = UUID()
+    /// Kalender, Kontakte oder Aufgaben
+    let what: String
+    let palmName: String
+    let conflicts: [SyncConflict]
+    let sessionToken: Int
 }
 
 /// Ein Palm, den HotSync noch nicht kennt: Der Dialog fragt, ob er ein neues
