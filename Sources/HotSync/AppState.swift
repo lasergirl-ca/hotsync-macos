@@ -91,6 +91,12 @@ final class AppState {
         portMonitor.start()
         scheduleAll()
 
+        // Netzwerkschnittstellen kommen und gehen, ohne dass es jemand meldet:
+        // jede Minute nachsehen, ob ein Anschluss ohne Sitzung jetzt einen hat
+        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.scheduleAll() }
+        }
+
         // Ruhezustand: Listener ohne Palm davor beenden, danach frisch starten.
         // Ein Werkzeug, das den Ruhezustand überlebt, sieht den Palm nicht mehr.
         let center = NSWorkspace.shared.notificationCenter
@@ -679,6 +685,9 @@ final class AppState {
         /// der Palm antwortet nicht mehr (abgebrochen oder Verbindung weg):
         /// nichts mehr anfangen, die Sitzung beenden
         var palmLost = false
+        /// Netz: eine verbundene Sitzung, von der nichts mehr kommt, wird
+        /// beendet - libpisocks TCP-Seite kennt kein Lese-Timeout
+        var watchdog: DispatchWorkItem?
         var stopRequested = false
 
         init(runner: SessionRunner, purpose: Purpose, token: Int) {
@@ -696,7 +705,13 @@ final class AppState {
         case .listener: timeout = Self.listenerRefresh    // läuft danach frisch weiter
         case .tab: timeout = chainStep ? Self.chainStepTimeout : 0
         }
-        let runner = SessionRunner(port: port, baudRate: baudRate, timeout: timeout)
+        // ein Netzwerkanschluss nennt die Schnittstelle; das Werkzeug braucht ihre Adresse von jetzt
+        var toolPort = port
+        if let interface = SyncTab.networkInterface(of: port), interface != SyncTab.networkAll {
+            guard let address = LocalAddress.address(ofInterface: interface) else { return }   // nicht verbunden: später
+            toolPort = SyncTab.networkPrefix + address.ip
+        }
+        let runner = SessionRunner(port: port, toolPort: toolPort, baudRate: baudRate, timeout: timeout)
         nextToken += 1
         let session = Session(runner: runner, purpose: purpose, token: nextToken)
         if case .tab(let id, _) = purpose {
@@ -728,8 +743,22 @@ final class AppState {
         }
     }
 
+    /// Nach dieser Zeit ohne Ereignis gilt eine Netzwerksitzung als hängend.
+    private static let networkIdleLimit: TimeInterval = 180
+
     private func handle(_ event: SessionEvent, of session: Session) {
         let port = session.runner.port
+        if SyncTab.isNetworkPort(port), session.connected || { if case .connected = event { return true } else { return false } }() {
+            session.watchdog?.cancel()
+            let work = DispatchWorkItem { [weak self, weak session] in
+                guard let self, let session, self.sessions[port] === session else { return }
+                if let tabId = session.tabId { self.tabLog(tabId, L10n.logNetworkIdle) }
+                DebugLog.shared.log(L10n.logNetworkIdle, source: self.portLabel(port))
+                session.runner.kill()
+            }
+            session.watchdog = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.networkIdleLimit, execute: work)
+        }
         switch event {
         case .listening:
             let since = Date()
@@ -1145,6 +1174,15 @@ final class AppState {
     /// Ein Palm hat sich gemeldet: gehört er hierher - und zu welchem Profil?
     private func admit(_ user: PalmUser, session: Session) {
         let port = session.runner.port
+        // Ein Palm ohne Benutzer bekommt eine Identität nur am Kabel: über das
+        // Netz wäre es das erste Gerät, das sich meldet, wessen auch immer.
+        if SyncTab.isNetworkPort(port), user.isBlank {
+            DebugLog.shared.log(L10n.logNoAdoptOverNetwork, source: portLabel(port))
+            if let tabId = session.tabId { tabLog(tabId, L10n.logNoAdoptOverNetwork) }
+            session.runner.send("log " + L10n.palmLogNothingInstalled)
+            session.runner.send("end")
+            return
+        }
         let expected: UUID?
         let candidates: [ProfileIdentity]
         let all = deviceManager.identities
@@ -1244,7 +1282,7 @@ final class AppState {
                 }
             }
             // über Kabel: diesen Mac als primären PC für den Netzwerk-HotSync eintragen
-            if profile.isNetSyncOn, session.runner.port != SyncTab.networkPort {
+            if profile.isNetSyncOn, !SyncTab.isNetworkPort(session.runner.port) {
                 if let address = LocalAddress.ipv4().first {
                     if dry {
                         tabLog(tabId, L10n.logDryRunNetSync(address.ip))
@@ -1585,6 +1623,11 @@ final class AppState {
         // Nur wenn zuletzt dieser Mac abgeglichen hat, heißt "fehlt auf dem
         // Palm" auch "dort gelöscht". Sonst (Hard Reset, anderer PC, halb
         // installierte Datenbank) wird auf dem Mac nichts gelöscht.
+        if SyncTab.isNetworkPort(session.runner.port), !fast {
+            // über das Netz nur ein Palm, den dieser Mac schon am Kabel abgeglichen hat
+            tabLog(tabId, L10n.logTwoWayNetworkNeedsCable(what))
+            return
+        }
         var engine = given
         engine.palmDeletesTrusted = fast
         engine.dateShift = session.dateFixYears   // DateFix: Palm-Jahre ↔ echte Jahre, an den Werten
@@ -1990,6 +2033,8 @@ final class AppState {
 
     /// Das Werkzeug hat sich beendet - alle Ereignisse sind ausgewertet.
     private func finish(_ session: Session, exit: SessionRunner.Exit) {
+        session.watchdog?.cancel()
+        session.watchdog = nil
         let port = session.runner.port
         if sessions[port] === session {
             sessions[port] = nil

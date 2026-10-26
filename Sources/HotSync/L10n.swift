@@ -182,14 +182,35 @@ enum L10n {
     static var tabPort: String { s("Anschluss", "Port") }
     static func tabPortMissing(_ name: String) -> String { s("\(name) (nicht verbunden)", "\(name) (not connected)") }
     static var tabBaudRate: String { s("Baudrate", "Baud rate") }
-    static var portNetwork: String { s("Netzwerk (WLAN)", "Network (Wi-Fi)") }
-    static func portNetworkHint(_ addresses: [String]) -> String {
-        let list = addresses.isEmpty ? s("keine Netzwerkadresse", "no network address") : addresses.joined(separator: ", ")
-        return s(
-            "Lauscht auf TCP 14238 wie der HotSync-Manager (Netzwerk-HotSync). Auf dem Palm: HotSync › Menü › Modem-Sync-Einst. › Netzwerk, dann Menü › Primärer PC-Setup, als Adresse die dieses Macs eintragen: \(list). Beim ersten Mal fragt macOS, ob HotSync eingehende Verbindungen annehmen darf.",
-            "Listens on TCP 14238 like HotSync Manager did (network HotSync). On the Palm: HotSync › menu › Modem Sync Prefs › Network, then menu › Primary PC Setup, and enter this Mac's address: \(list). The first time, macOS asks whether HotSync may accept incoming connections."
+    static func portNetworkInterface(_ name: String, _ ip: String) -> String { s("Netzwerk: \(name) (\(ip))", "Network: \(name) (\(ip))") }
+    static var portNetworkAll: String { s("Netzwerk: alle Schnittstellen (nicht empfohlen)", "Network: all interfaces (not recommended)") }
+    static func portNetworkHint(_ ip: String?, all: Bool) -> String {
+        let address = ip ?? s("keine Adresse", "no address")
+        let where_ = all
+            ? s("Lauscht auf TCP 14238 auf jeder Schnittstelle – auch Ethernet und VPN. Der Netzwerk-HotSync kennt kein Passwort: jeder im selben Netz, der die Benutzer-ID eines Palms kennt, kann sich als dieser melden. Besser nur das WLAN.",
+                "Listens on TCP 14238 on every interface – Ethernet and VPN included. Network HotSync has no password: anyone on the same network who knows a Palm's user ID can connect as it. Better to pick the Wi-Fi alone.")
+            : s("Lauscht auf TCP 14238 nur auf dieser Schnittstelle, wie der HotSync-Manager (Netzwerk-HotSync); der Netzwerk-HotSync kennt kein Passwort, die Benutzer-ID des Palms ist die ganze Prüfung.",
+                "Listens on TCP 14238 on this interface only, like HotSync Manager did (network HotSync); network HotSync has no password, the Palm's user ID is the whole check.")
+        return where_ + s(
+            " Auf dem Palm: HotSync › Menü › Modem-Sync-Einst. › Netzwerk, dann Menü › Primärer PC-Setup, Adresse dieses Macs: \(address). Beim ersten Mal fragt macOS, ob HotSync eingehende Verbindungen annehmen darf. Der erste HotSync eines Palms und jeder Abgleich in beide Richtungen nach einem Reset brauchen das Kabel.",
+            " On the Palm: HotSync › menu › Modem Sync Prefs › Network, then menu › Primary PC Setup, this Mac's address: \(address). The first time, macOS asks whether HotSync may accept incoming connections. A Palm's first HotSync, and a two-way sync after a reset, need the cable."
         )
     }
+    static var tabPortsHint: String { s(
+        "Ein Palm kann einen Tab je Anschluss haben – etwa USB und WLAN; sie teilen Profil, Einstellungen und Spiegel.",
+        "A Palm can have one tab per port – USB and Wi-Fi, say; they share the profile, its settings and the mirrors."
+    ) }
+    static var logNoAdoptOverNetwork: String { s(
+        "Ein Palm ohne Benutzer hat sich über das Netz gemeldet: keine Identität vergeben – der erste HotSync eines Palms geht über das Kabel",
+        "A Palm without a user connected over the network: no identity assigned – a Palm's first HotSync goes over the cable"
+    ) }
+    static func logTwoWayNetworkNeedsCable(_ what: String) -> String { s(
+        "\(what): über das Netz nur für einen Palm, den dieser Mac zuletzt abgeglichen hat – erst ein HotSync am Kabel",
+        "\(what): over the network only for a Palm this Mac synced last – one HotSync over the cable first"
+    ) }
+    static var logNetworkIdle: String { s(
+        "Netzwerk: seit drei Minuten nichts vom Palm, Sitzung beendet", "Network: nothing from the Palm for three minutes, session ended"
+    ) }
     static func portNetworkAddress(_ ip: String?) -> String {
         s("Adresse dieses Macs: \(ip ?? "–")", "this Mac's address: \(ip ?? "–")")
     }

@@ -267,8 +267,9 @@ struct TabDetailView: View {
     /// sich zuletzt gemeldet hat.
     private var portText: String {
         var parts: [String] = []
-        if tab.isNetwork {
-            parts.append(L10n.portNetworkAddress(LocalAddress.ipv4().first?.ip))
+        if let interface = tab.networkInterface {
+            let address = interface == SyncTab.networkAll ? LocalAddress.ipv4().first : LocalAddress.address(ofInterface: interface)
+            parts.append(L10n.portNetworkAddress(address?.ip))
         }
         if tab.isSerial {
             if let serial = appState.portMonitor.serialPort(tab.port) {

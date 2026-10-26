@@ -48,12 +48,24 @@ struct SyncTab: Codable, Identifiable, Equatable {
     static let baudRates = [9600, 19200, 38400, 57600, 115200]
 
     /// Netzwerk-HotSync: libpisock lauscht auf TCP 14238 (NetSync), der Palm
-    /// verbindet sich über WLAN mit der Adresse des "primären PCs".
-    static let networkPort = "net:any"
+    /// verbindet sich über WLAN mit der Adresse des "primären PCs". Der
+    /// Anschluss nennt die Schnittstelle ("net:en1"); ihre Adresse wird beim
+    /// Start nachgeschlagen, weil DHCP sie ändern kann. "net:any" lauscht
+    /// auf allen - Ethernet und VPN eingeschlossen, darum nicht die Vorgabe.
+    static let networkPrefix = "net:"
+    static let networkAll = "any"
+    static let networkPort = networkPrefix + networkAll
+    static func networkPort(interface: String) -> String { networkPrefix + interface }
+    static func isNetworkPort(_ port: String) -> Bool { port.hasPrefix(networkPrefix) }
+    /// "en1", or "any"
+    static func networkInterface(of port: String) -> String? {
+        isNetworkPort(port) ? String(port.dropFirst(networkPrefix.count)) : nil
+    }
 
     var isUSB: Bool { port == Self.usbPort }
-    var isNetwork: Bool { port == Self.networkPort }
+    var isNetwork: Bool { Self.isNetworkPort(port) }
     var isSerial: Bool { !isUSB && !isNetwork }
+    var networkInterface: String? { Self.networkInterface(of: port) }
 
     /// Kurzname des Anschlusses für Tab-Titel: "USB", "Wi-Fi", "cu.usbserial-A1".
     var portLabel: String {
@@ -61,11 +73,12 @@ struct SyncTab: Codable, Identifiable, Equatable {
     }
 
     static func label(_ port: String) -> String {
-        switch port {
-        case usbPort: return "USB"
-        case networkPort: return "Wi-Fi"
-        default: return (port as NSString).lastPathComponent
+        if port == usbPort { return "USB" }
+        if let interface = networkInterface(of: port) {
+            if interface == networkAll { return "Network" }
+            return interface == LocalAddress.wifiInterface ? "Wi-Fi" : "Network (\(interface))"
         }
+        return (port as NSString).lastPathComponent
     }
 }
 

@@ -27,9 +27,13 @@ final class SessionRunner {
     private let errors = Pipe()
 
     /// - Parameter timeout: Sekunden bis "kein Palm", 0 = bis gestoppt
-    init(port: String, baudRate: Int, timeout: Int) {
+    /// - Parameters:
+    ///   - port: der Anschluss des Tabs, Schlüssel der Sitzung
+    ///   - toolPort: was das Werkzeug bekommt (für "net:en1" die Adresse der
+    ///     Schnittstelle, "net:192.168.0.5"); sonst derselbe
+    init(port: String, toolPort: String? = nil, baudRate: Int, timeout: Int) {
         self.port = port
-        process.arguments = ["--port", port, "--timeout", String(timeout)]
+        process.arguments = ["--port", toolPort ?? port, "--timeout", String(timeout)]
         var environment = ProcessInfo.processInfo.environment
         // pilot-link liest die serielle Baudrate aus PILOTRATE
         environment["PILOTRATE"] = String(baudRate)

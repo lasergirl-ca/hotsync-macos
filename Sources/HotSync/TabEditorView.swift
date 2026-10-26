@@ -26,7 +26,6 @@ struct TabEditorView: View {
 
                 Picker(L10n.tabPort, selection: $draft.port) {
                     Text("USB").tag(SyncTab.usbPort)
-                    Text(L10n.portNetwork).tag(SyncTab.networkPort)
                     ForEach(appState.portMonitor.serialPorts) { port in
                         Text(serialLabel(port)).tag(port.id)
                     }
@@ -34,13 +33,30 @@ struct TabEditorView: View {
                     if draft.isSerial && appState.portMonitor.serialPort(draft.port) == nil {
                         Text(L10n.tabPortMissing(draft.portLabel)).tag(draft.port)
                     }
+                    Divider()
+                    // Netzwerk: je Schnittstelle, WLAN zuerst; alle nur ausdrücklich
+                    ForEach(addresses, id: \.interface) { address in
+                        Text(L10n.portNetworkInterface(address.interface == LocalAddress.wifiInterface ? "Wi-Fi" : address.interface, address.ip))
+                            .tag(SyncTab.networkPort(interface: address.interface))
+                    }
+                    if let interface = draft.networkInterface, interface != SyncTab.networkAll,
+                       !addresses.contains(where: { $0.interface == interface }) {
+                        Text(L10n.tabPortMissing("Network (\(interface))")).tag(draft.port)
+                    }
+                    Text(L10n.portNetworkAll).tag(SyncTab.networkPort)
                 }
                 if draft.isNetwork {
-                    Text(L10n.portNetworkHint(LocalAddress.ipv4().map { "\($0.ip) (\($0.interface))" }))
+                    let address = draft.networkInterface == SyncTab.networkAll ? addresses.first
+                        : addresses.first { $0.interface == draft.networkInterface }
+                    Text(L10n.portNetworkHint(address?.ip, all: draft.networkInterface == SyncTab.networkAll))
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(draft.networkInterface == SyncTab.networkAll ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Text(L10n.tabPortsHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 if draft.isSerial {
                     Picker(L10n.tabBaudRate, selection: $draft.baudRate) {
@@ -109,6 +125,9 @@ struct TabEditorView: View {
     }
 
     /// Derselbe Palm am selben Anschluss als zweiter Tab ergibt keinen Sinn.
+    /// Die Netzwerkschnittstellen dieses Macs, WLAN zuerst.
+    private var addresses: [LocalAddress.Address] { LocalAddress.ipv4() }
+
     private var duplicate: SyncTab? {
         appState.tabStore.tabs.first {
             $0.id != draft.id && $0.profileId == draft.profileId && $0.port == draft.port

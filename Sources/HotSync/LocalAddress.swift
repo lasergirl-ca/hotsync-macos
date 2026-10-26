@@ -10,6 +10,13 @@ enum LocalAddress {
         Host.current().localizedName ?? ProcessInfo.processInfo.hostName
     }
 
+    /// The Wi-Fi interface's name ("en1"), where the Palm is.
+    static var wifiInterface: String? { CWWiFiClient.shared().interface()?.interfaceName }
+
+    static func address(ofInterface name: String) -> Address? {
+        ipv4().first { $0.interface == name }
+    }
+
     struct Address: Equatable {
         let interface: String
         let ip: String
