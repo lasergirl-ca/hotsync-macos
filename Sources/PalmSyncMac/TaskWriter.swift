@@ -21,14 +21,17 @@ public struct TaskWriter {
     public let homeZone: TimeZone
     /// Which Reminders list a Palm category goes to.
     public let listForCategory: (String) -> EKCalendar?
+    /// Where a new reminder goes when no list matches its category.
+    public let fallback: EKCalendar?
     private let calendar: Calendar
     private let builder: TasksBuilder
 
     public init(store: EKEventStore, homeZone: TimeZone = .current, today: PalmDate, startOfWeek: UInt8 = 0,
-                listForCategory: @escaping (String) -> EKCalendar?) {
+                fallback: EKCalendar? = nil, listForCategory: @escaping (String) -> EKCalendar?) {
         self.store = store
         self.homeZone = homeZone
         self.listForCategory = listForCategory
+        self.fallback = fallback
         var c = Calendar(identifier: .gregorian)
         c.timeZone = homeZone
         calendar = c
@@ -103,7 +106,7 @@ public struct TaskWriter {
         var result = Result()
 
         for change in plan.macCreates {
-            guard let list = listForCategory(change.item.category) ?? store.defaultCalendarForNewReminders() else {
+            guard let list = listForCategory(change.item.category) ?? fallback ?? store.defaultCalendarForNewReminders() else {
                 result.failures.append("\(change.item.title ?? "?"): no list for category \(change.item.category)")
                 result.failedEntries.append(change.entry)
                 continue
@@ -127,7 +130,8 @@ public struct TaskWriter {
                 continue
             }
             fill(r, from: change.item)
-            if let list = listForCategory(change.item.category), list != r.calendar { r.calendar = list }
+            // a reminder moves lists only when the Palm changed its category
+            if change.changed.contains(.category), let list = listForCategory(change.item.category), list != r.calendar { r.calendar = list }
             do {
                 try store.save(r, commit: true)
                 result.updated += 1

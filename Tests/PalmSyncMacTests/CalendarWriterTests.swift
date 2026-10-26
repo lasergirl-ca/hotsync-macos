@@ -91,3 +91,32 @@ private let vancouver: Calendar = {
     let back = CalendarBuilder.palmRule(mac!, startDate: start, endDate: nil, defaultWeekStart: 0)
     #expect(back?.type == .weekly && back?.weekdays == [.tuesday, .thursday])
 }
+
+@Test func updateTouchesOnlyTheChangedFields() {
+    // a three-day timed event with two alarms and a URL on the Mac
+    let ek = EKEvent(eventStore: store)
+    ek.title = "Conference"
+    ek.startDate = vancouver.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 9, minute: 0))!
+    ek.endDate = vancouver.date(from: DateComponents(year: 2026, month: 10, day: 22, hour: 17, minute: 0))!
+    ek.timeZone = TimeZone(identifier: "Europe/Berlin")
+    ek.addAlarm(EKAlarm(relativeOffset: -900))
+    ek.addAlarm(EKAlarm(relativeOffset: -3600))
+    ek.url = URL(string: "https://example.com/conf")
+    ek.notes = "bring the badge"
+
+    // the Palm changed the title and moved it a day later; its note still ends in the URL
+    let event = SyncedEvent(date: PalmDate(year: 2026, month: 10, day: 21),
+                            time: .init(start: PalmTime(hour: 9, minute: 0), end: PalmTime(hour: 17, minute: 0)),
+                            title: "Conference 2026", note: "bring the badge\nhttps://example.com/conf", category: "Work")
+    CalendarWriter.fill(ek, from: event, in: vancouver, fields: [.title, .date])
+    #expect(ek.title == "Conference 2026")
+    #expect(vancouver.component(.day, from: ek.startDate) == 21)
+    #expect(ek.endDate.timeIntervalSince(ek.startDate) == 2 * 86400 + 8 * 3600)   // still three days long
+    #expect(ek.alarms?.count == 2)                                                  // both alarms kept
+    #expect(ek.timeZone?.identifier == "Europe/Berlin")                              // zone kept
+    #expect(ek.notes == "bring the badge")                                           // untouched
+
+    // the note alone: the URL line is stripped, nothing else moves
+    CalendarWriter.fill(ek, from: event, in: vancouver, fields: [.note])
+    #expect(ek.notes == "bring the badge" && ek.url?.absoluteString == "https://example.com/conf")
+}

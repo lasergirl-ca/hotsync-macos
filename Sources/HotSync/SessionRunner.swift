@@ -76,7 +76,9 @@ final class SessionRunner {
 
     /// Eine Anweisung an das Werkzeug (siehe hotsync-session.c).
     func send(_ command: String) {
-        guard process.isRunning, let data = (command + "\n").data(using: .utf8) else { return }
+        // eine Anweisung ist eine Zeile; Text vom Palm (Benutzername) darf keine zweite anfangen
+        let line = command.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")
+        guard process.isRunning, let data = (line + "\n").data(using: .utf8) else { return }
         do {
             try input.fileHandleForWriting.write(contentsOf: data)
         } catch {

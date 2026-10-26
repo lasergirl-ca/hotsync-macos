@@ -384,3 +384,27 @@ private func syncedMirror() -> CalendarMirror {
                                mac: items([macEvent("Standup", standupStart)]), mirror: mirror)
     #expect(next.macUpdates.isEmpty && next.entries[0].palmRecord == broken.data && next.entries[0].item == mirror.entries[0].base)
 }
+
+@Test func macUpdatesNameTheChangedFields() throws {
+    // the Palm changed only the title
+    let palmEdit = palmRecord(id: 0x1001, "Standup!", standupDate, attributes: 0x40)
+    let plan = try engine.plan(palm: .modified([palmEdit]), palmCategories: palmCategories,
+                               mac: items([macEvent("Standup", standupStart)]), mirror: syncedMirror())
+    #expect(plan.macUpdates[0].changed == [.title])
+    // both sides: the Palm the title, the Mac the time → the Mac gets the title only
+    let macEdit = macEvent("Standup", at(2026, 10, 20, 9, 15))
+    let both = try engine.plan(palm: .modified([palmEdit]), palmCategories: palmCategories, mac: items([macEdit]), mirror: syncedMirror())
+    #expect(both.macUpdates[0].changed == [.title])
+}
+
+@Test func categoriesPastTheSlotsGoToOther() throws {
+    var names = ["Unfiled"] + (1...14).map { "Cat\($0)" } + ["Other"]
+    #expect(names.count == 16)
+    let mac = items([macEvent("Overflow", standupStart, calendar: "ical-family")])   // category "Family", no slot left
+    let plan = try engine.plan(palm: .all([]), palmCategories: names, mac: mac, mirror: SyncMirror(pcID: 7))
+    let (db, _, categories) = plan.palmDatabase(categories: CategoryAppInfo(names: names))
+    #expect(db.records[0].category == 15 && categories.names[15] == "Other")
+    names.removeLast()
+    let (db2, _, _) = plan.palmDatabase(categories: CategoryAppInfo(names: names + [""]))
+    #expect(db2.records[0].category == 15)   // a free slot: taken
+}

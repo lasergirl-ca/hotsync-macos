@@ -2,11 +2,12 @@ import EventKit
 import Foundation
 import PalmSync
 
-/// Applies the Mac side of a calendar sync plan to Calendar.app: the shared
-/// fields of a SyncedEvent go into an EKEvent (new or existing), rules
-/// become EKRecurrenceRules, exceptions remove occurrences. The mapping is
-/// a set of static functions, tested without saving; `apply` does the
-/// saving and returns the keys of what it created.
+/// Applies the Mac side of a calendar sync plan to Calendar.app. A new
+/// event gets every shared field; an update gets only the fields the Palm
+/// changed, so a multi-day event keeps its length, a second alarm stays,
+/// the time zone stays, and a series keeps its start unless the Palm
+/// moved it. The mapping is a set of static functions, tested without
+/// saving; `apply` does the saving and returns the keys of what it created.
 public struct CalendarWriter {
     public struct Result: Equatable, Sendable {
         /// Entry index of each create in the plan → the key the Mac gave it.
@@ -21,14 +22,18 @@ public struct CalendarWriter {
 
     public let store: EKEventStore
     public let homeZone: TimeZone
-    /// Which Mac calendar a Palm category name goes to (the first chosen
-    /// calendar with that category).
+    /// Which Mac calendar a Palm category name goes to (the chosen calendar
+    /// whose category, cut to the Palm's 15 characters, is that name).
     public let calendarForCategory: (String) -> EKCalendar?
+    /// Where a new event goes when no calendar matches its category.
+    public let fallback: EKCalendar?
     private let calendar: Calendar
 
-    public init(store: EKEventStore, homeZone: TimeZone = .current, calendarForCategory: @escaping (String) -> EKCalendar?) {
+    public init(store: EKEventStore, homeZone: TimeZone = .current, fallback: EKCalendar? = nil,
+                calendarForCategory: @escaping (String) -> EKCalendar?) {
         self.store = store
         self.homeZone = homeZone
+        self.fallback = fallback
         self.calendarForCategory = calendarForCategory
         var c = Calendar(identifier: .gregorian)
         c.timeZone = homeZone
@@ -41,42 +46,74 @@ public struct CalendarWriter {
         calendar.date(from: DateComponents(year: d.year, month: d.month, day: d.day, hour: t?.hour ?? 0, minute: t?.minute ?? 0))!
     }
 
-    /// Writes the shared fields into the event. Fields the Palm has no say
-    /// in (attendees, URL, travel time, …) are left alone.
-    public static func fill(_ ek: EKEvent, from event: SyncedEvent, in calendar: Calendar) {
-        ek.title = event.title ?? ""
-        ek.notes = event.note
-        ek.location = event.location
-        ek.timeZone = calendar.timeZone
-        if let time = event.time {
-            ek.isAllDay = false
-            ek.startDate = date(event.date, time.start, in: calendar)
-            var end = date(event.date, time.end, in: calendar)
-            if end < ek.startDate { end = ek.startDate }
-            ek.endDate = end
-        } else {
-            // EventKit keeps an all-day event on the device's local day, so
-            // the day is made in the device's calendar, not the Palm's zone
-            ek.isAllDay = true
-            ek.timeZone = nil
-            ek.startDate = date(event.date, nil, in: Calendar.current)
-            ek.endDate = Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: ek.startDate)!
-        }
+    /// Writes the shared fields into the event: all of them for a new
+    /// event (`fields` nil), otherwise only the named ones. Fields the Palm
+    /// has no say in (attendees, URL, travel time, a second alarm, the
+    /// zone of an existing event, the length of a multi-day event) are
+    /// left alone.
+    public static func fill(_ ek: EKEvent, from event: SyncedEvent, in calendar: Calendar, fields: Set<SyncedEvent.Field>? = nil) {
+        let isNew = fields == nil
+        func wanted(_ f: SyncedEvent.Field) -> Bool { fields?.contains(f) ?? true }
 
-        ek.alarms = nil
-        if let alarm = event.alarm {
-            let seconds: TimeInterval
-            switch alarm.unit {
-            case .minutes: seconds = TimeInterval(alarm.advance) * 60
-            case .hours: seconds = TimeInterval(alarm.advance) * 3600
-            case .days: seconds = TimeInterval(alarm.advance) * 86400
+        if wanted(.title) { ek.title = event.title ?? "" }
+        if wanted(.note) {
+            // the builder puts the URL on the note's last line; it lives in ek.url
+            var note = event.note ?? ""
+            if let url = ek.url?.absoluteString, note.hasSuffix(url) {
+                note = String(note.dropLast(url.count)).trimmingCharacters(in: .whitespacesAndNewlines)
             }
-            ek.addAlarm(EKAlarm(relativeOffset: -seconds))
+            ek.notes = note.isEmpty ? nil : note
+        }
+        if wanted(.location) { ek.location = event.location }
+
+        if isNew {
+            ek.timeZone = calendar.timeZone
+        }
+        if wanted(.date) || wanted(.time) {
+            if let time = event.time {
+                let start = date(event.date, time.start, in: calendar)
+                var end = date(event.date, time.end, in: calendar)
+                if end < start { end = start }
+                if !isNew, let oldStart = ek.startDate, let oldEnd = ek.endDate,
+                   calendar.startOfDay(for: oldEnd) > calendar.startOfDay(for: oldStart) {
+                    // a multi-day event: the Palm shows one day of it; keep its length
+                    end = start.addingTimeInterval(oldEnd.timeIntervalSince(oldStart))
+                }
+                ek.isAllDay = false
+                ek.startDate = start
+                ek.endDate = end
+            } else {
+                // EventKit keeps an all-day event on the device's local day
+                let start = date(event.date, nil, in: Calendar.current)
+                var end = Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: start)!
+                if !isNew, ek.isAllDay, let oldStart = ek.startDate, let oldEnd = ek.endDate {
+                    end = start.addingTimeInterval(oldEnd.timeIntervalSince(oldStart))
+                }
+                ek.isAllDay = true
+                if isNew { ek.timeZone = nil }
+                ek.startDate = start
+                ek.endDate = end
+            }
         }
 
-        if let existing = ek.recurrenceRules { for rule in existing { ek.removeRecurrenceRule(rule) } }
-        if let rule = event.repeatRule {
-            ek.addRecurrenceRule(recurrenceRule(rule, start: event.date, in: calendar))
+        if wanted(.alarm) {
+            ek.alarms = nil
+            if let alarm = event.alarm {
+                let seconds: TimeInterval
+                switch alarm.unit {
+                case .minutes: seconds = TimeInterval(alarm.advance) * 60
+                case .hours: seconds = TimeInterval(alarm.advance) * 3600
+                case .days: seconds = TimeInterval(alarm.advance) * 86400
+                }
+                ek.addAlarm(EKAlarm(relativeOffset: -seconds))
+            }
+        }
+
+        if wanted(.repeatRule) {
+            if let existing = ek.recurrenceRules { for rule in existing { ek.removeRecurrenceRule(rule) } }
+            if let rule = event.repeatRule {
+                ek.addRecurrenceRule(recurrenceRule(rule, start: event.date, in: calendar))
+            }
         }
     }
 
@@ -115,7 +152,7 @@ public struct CalendarWriter {
         var result = Result()
 
         for change in plan.macCreates {
-            guard let target = calendarForCategory(change.item.category) ?? store.defaultCalendarForNewEvents else {
+            guard let target = calendarForCategory(change.item.category) ?? fallback ?? store.defaultCalendarForNewEvents else {
                 result.failures.append("\(change.item.title ?? "?"): no calendar for category \(change.item.category)")
                 result.failedEntries.append(change.entry)
                 continue
@@ -139,11 +176,15 @@ public struct CalendarWriter {
                 result.failedEntries.append(change.entry)
                 continue
             }
-            Self.fill(ek, from: change.item, in: calendar)
-            if let target = calendarForCategory(change.item.category), target != ek.calendar { ek.calendar = target }
+            let fields = Set(change.changed)
+            Self.fill(ek, from: change.item, in: calendar, fields: fields)
+            // an event moves calendars only when the Palm changed its category
+            if fields.contains(.category), let target = calendarForCategory(change.item.category), target != ek.calendar {
+                ek.calendar = target
+            }
             do {
                 try store.save(ek, span: key.occurrence == nil ? .futureEvents : .thisEvent, commit: true)
-                if key.occurrence == nil { removeExceptions(of: ek, change.item.exceptions) }
+                if key.occurrence == nil, fields.contains(.exceptions) { removeExceptions(of: ek, change.item.exceptions) }
                 result.updated += 1
             } catch {
                 result.failures.append("\(change.item.title ?? "?"): \(error.localizedDescription)")
@@ -175,14 +216,17 @@ public struct CalendarWriter {
         }
     }
 
-    /// The Palm's exception dates: those occurrences disappear from the Mac.
+    /// The Palm's exception dates: those plain occurrences disappear from
+    /// the Mac. An occurrence the Mac detached (edited or moved on its own)
+    /// is an item of its own in the plan and stays.
     private func removeExceptions(of master: EKEvent, _ exceptions: [PalmDate]) {
         guard !exceptions.isEmpty else { return }
         for date in exceptions {
             let day = Self.date(date, nil, in: calendar)
             let predicate = store.predicateForEvents(withStart: day, end: calendar.date(byAdding: .day, value: 1, to: day)!,
                                                      calendars: [master.calendar])
-            for occurrence in store.events(matching: predicate) where occurrence.calendarItemIdentifier == master.calendarItemIdentifier {
+            for occurrence in store.events(matching: predicate)
+            where occurrence.calendarItemIdentifier == master.calendarItemIdentifier && !occurrence.isDetached {
                 try? store.remove(occurrence, span: .thisEvent, commit: true)
             }
         }

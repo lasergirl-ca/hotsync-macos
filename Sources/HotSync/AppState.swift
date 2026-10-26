@@ -748,7 +748,12 @@ final class AppState {
         case .connected(let user, let romVersion, let dateFixStartYear):
             session.connected = true
             session.romVersion = romVersion
-            session.dateFixYears = dateFixStartYear.map { $0 - 1904 } ?? 0
+            // nur was DateFix selbst zulässt: 1904 … 1972 in Viererschritten
+            if let y = dateFixStartYear, (1904...1972).contains(y), (y - 1904) % 4 == 0 {
+                session.dateFixYears = y - 1904
+            } else {
+                session.dateFixYears = 0
+            }
             // ein Palm ist durchgekommen: frühere Fehler hier sind erledigt
             notices.removeAll { if case .failed = $0.kind { return $0.port == port } else { return false } }
             session.user = user
@@ -1564,7 +1569,17 @@ final class AppState {
     ) {
         guard let tabId = session.tabId else { return }
         let url = mirrorURL(mirrorFile, for: profile)
-        let mirror = (try? SyncMirror<Item>.load(from: url)) ?? SyncMirror<Item>(pcID: SyncMirror<Item>.newPCID())
+        let mirror: SyncMirror<Item>
+        if FileManager.default.fileExists(atPath: url.path) {
+            // ein Spiegel, der nicht lädt, ist kein neuer Spiegel: ohne ihn
+            // würde alles nach Inhalt gepaart und Doppeltes angelegt
+            do { mirror = try SyncMirror<Item>.load(from: url) } catch {
+                tabLog(tabId, L10n.logTwoWayMirrorBroken(what, url.lastPathComponent, error.localizedDescription))
+                return
+            }
+        } else {
+            mirror = SyncMirror<Item>(pcID: SyncMirror<Item>.newPCID())
+        }
         let fast = mirror.lastSync != nil && session.lastSyncPC == mirror.pcID
         tabLog(tabId, L10n.logTwoWayMode(what, fast: fast, lastSyncPC: session.lastSyncPC, mirrorEntries: mirror.entries.count))
         // Nur wenn zuletzt dieser Mac abgeglichen hat, heißt "fehlt auf dem
@@ -1664,9 +1679,12 @@ final class AppState {
                         palmRecord: $0.event.encode())
         }
         let calendars = settings.calendars
-        let writer = CalendarWriter(store: calendarSource.store, homeZone: .current) { category in
-            let id = calendars.first { ($0.category ?? $0.title) == category }?.id ?? calendars.first?.id
-            return id.flatMap { self.calendarSource.store.calendar(withIdentifier: $0) }
+        let store = calendarSource.store
+        let writer = CalendarWriter(store: store, homeZone: .current,
+                                    fallback: calendars.first.flatMap { store.calendar(withIdentifier: $0.id) }) { category in
+            // the Palm holds 15 characters of a name
+            let id = calendars.first { String(($0.category ?? $0.title).prefix(CategoryAppInfo.nameWidth - 1)) == category }?.id
+            return id.flatMap { store.calendar(withIdentifier: $0) }
         }
         twoWayRun(session, profile: profile, what: L10n.twoWayCalendar, mirrorFile: "calendar-mirror.json", engine: engine,
                   palmCategories: appInfo?.categories.names ?? ["Unfiled"], mac: mac,
@@ -1753,9 +1771,11 @@ final class AppState {
                                                       startOfWeek: startOfWeek))
             let engine = SyncEngine<SyncedTask>(conflictPolicy: settings.conflicts, inWindow: builder.inWindow)
             let lists = settings.lists
-            let writer = TaskWriter(store: self.reminderSource.store, homeZone: .current, today: today, startOfWeek: startOfWeek) { category in
-                let id = lists.first { $0.title == category }?.id ?? lists.first?.id
-                return id.flatMap { self.reminderSource.store.calendar(withIdentifier: $0) }
+            let store = self.reminderSource.store
+            let writer = TaskWriter(store: store, homeZone: .current, today: today, startOfWeek: startOfWeek,
+                                    fallback: lists.first.flatMap { store.calendar(withIdentifier: $0.id) }) { category in
+                let id = lists.first { String($0.title.prefix(CategoryAppInfo.nameWidth - 1)) == category }?.id
+                return id.flatMap { store.calendar(withIdentifier: $0) }
             }
             self.twoWayRun(session, profile: profile, what: L10n.twoWayTasks, mirrorFile: "tasks-mirror.json", engine: engine,
                            palmCategories: appInfo.categories.names, mac: builder.syncItems(reminders),
@@ -1781,7 +1801,11 @@ final class AppState {
             let entries = try finish()
             tabLog(tabId, L10n.logTwoWayMirrorSaved(entries))
         } catch {
+            // ohne gespeicherten Spiegel darf der Palm uns nicht als letzten PC
+            // führen: der nächste Abgleich paart nach Inhalt und löscht nichts
             tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
+            twoWayNext(session)
+            return
         }
         session.runner.send("syncinfo \(session.twoWayPCID)")
     }

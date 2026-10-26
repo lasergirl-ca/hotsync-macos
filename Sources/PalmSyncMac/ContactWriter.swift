@@ -189,7 +189,8 @@ public struct ContactWriter {
             Self.fill(c, from: change.item)
             let request = CNSaveRequest()
             request.update(c)
-            place(c, in: change.item.category, request: request)
+            // group membership changes only when the Palm changed the category
+            if change.changed.contains(.category) { place(c, in: change.item.category, request: request) }
             do {
                 try store.execute(request)
                 result.updated += 1
@@ -200,17 +201,34 @@ public struct ContactWriter {
         }
 
         for key in plan.macDeletes {
-            guard let existing = find(key) else { continue }   // already gone: fine
+            // only the cards in the chosen accounts: a unified contact may be
+            // linked to cards in accounts the sync does not cover
+            let cards = ownCards(of: key)
+            guard !cards.isEmpty else { continue }   // already gone, or not ours: fine
             let request = CNSaveRequest()
-            request.delete(existing.mutableCopy() as! CNMutableContact)
+            for card in cards { request.delete(card.mutableCopy() as! CNMutableContact) }
             do {
                 try store.execute(request)
                 result.deleted += 1
             } catch {
-                result.failures.append("\(existing.givenName) \(existing.familyName): \(error.localizedDescription)")
+                result.failures.append("\(cards[0].givenName) \(cards[0].familyName): \(error.localizedDescription)")
             }
         }
         return result
+    }
+
+    /// The non-unified cards behind a contact that live in the chosen accounts.
+    private func ownCards(of key: MacKey) -> [CNContact] {
+        guard let unified = find(key) else { return [] }
+        let request = CNContactFetchRequest(keysToFetch: [CNContactIdentifierKey, CNContactGivenNameKey, CNContactFamilyNameKey] as [CNKeyDescriptor])
+        request.unifyResults = false
+        request.predicate = CNContact.predicateForContacts(withIdentifiers: [unified.identifier])
+        var cards: [CNContact] = []
+        try? store.enumerateContacts(with: request) { card, _ in
+            let containers = (try? store.containers(matching: CNContainer.predicateForContainerOfContact(withIdentifier: card.identifier))) ?? []
+            if containers.contains(where: { containerIDs.contains($0.identifier) }) { cards.append(card) }
+        }
+        return cards
     }
 
     public func find(_ key: MacKey) -> CNContact? {

@@ -47,6 +47,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -635,9 +636,15 @@ static void get_rom(int sd, const char *dir)
 
 /* ---- Sitzung ------------------------------------------------------------ */
 
+/* Für net: - libpisocks accept() kennt kein Timeout. Ein Wecker unterbricht
+ * es (EINTR, ohne SA_RESTART), und das zählt dann als Timeout. */
+static volatile sig_atomic_t accept_alarm_fired = 0;
+static void accept_alarm(int signo) { (void)signo; accept_alarm_fired = 1; }
+
 static int connect_palm(const char *port, int timeout)
 {
 	int listen_sd, sd;
+	int is_net = strncmp(port, "net:", 4) == 0;
 
 	listen_sd = pi_socket(PI_AF_PILOT, PI_SOCK_STREAM, PI_PF_DLP);
 	if (listen_sd < 0) {
@@ -665,7 +672,24 @@ static int connect_palm(const char *port, int timeout)
 	 *   und lässt den Listener offen.
 	 * - seriell: PI_ERR_SOCK_TIMEOUT; bei negativen Werten hat pi_accept_to
 	 *   den Listener schon selbst geschlossen. */
+	if (is_net && timeout > 0) {
+		struct sigaction sa;
+		memset(&sa, 0, sizeof(sa));
+		sa.sa_handler = accept_alarm;
+		sigaction(SIGALRM, &sa, NULL);
+		accept_alarm_fired = 0;
+		alarm((unsigned)timeout);
+	}
 	sd = pi_accept_to(listen_sd, NULL, NULL, timeout);
+	if (is_net && timeout > 0) {
+		alarm(0);
+		if (sd < 0 && accept_alarm_fired) {
+			pi_close(listen_sd);
+			emit_begin("timeout");
+			emit_end();
+			return -2;
+		}
+	}
 	if (sd == 0) {
 		pi_close(listen_sd);
 		emit_begin("timeout");
@@ -718,7 +742,10 @@ static int report_identity(int sd)
 		int version = 0;
 		if (dlp_ReadAppPreference(sd, 0x44744678UL /* 'DtFx' */, 0, 1, sizeof(pref), pref, &size, &version) >= 0
 		    && size == 6 && version == 2 && pref[4] != 0) {
-			emit_int("dateFixStartYear", (long)((pref[2] << 8) | pref[3]));
+			int year = (pref[2] << 8) | pref[3];
+			/* DateFix erlaubt 1904 … 1972 in Viererschritten; alles andere ist kaputt */
+			if (year >= 1904 && year <= 1972 && (year - 1904) % 4 == 0)
+				emit_int("dateFixStartYear", (long)year);
 		}
 	}
 	emit_end();

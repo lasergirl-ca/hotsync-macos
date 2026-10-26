@@ -194,8 +194,6 @@ enum L10n {
         s("Adresse dieses Macs: \(ip ?? "–")", "this Mac's address: \(ip ?? "–")")
     }
     static var tabSyncMode: String { s("HotSync", "HotSync") }
-    static var tabSyncModeFull: String { s("Installieren + Sichern", "Install + Back Up") }
-    static var tabSyncModeInstall: String { s("Nur installieren", "Install Only") }
     static var tabSyncModeHint: String { s(
         "„Abgleichen“ ist der Kalender- und Kontakte-Abgleich, wie er im Tab eingestellt ist; „Installieren“ die Warteschlange; „Sichern“ holt nach den Installationen die Datenbanken im RAM des Palms auf den Mac – beim ersten Mal alle, danach nur die geänderten. Für einen langsamen seriellen Tab kann „Nur installieren“ sinnvoll sein.",
         "“Sync” is the calendar and contacts sync as set up in the tab; “Install” the queue; “Back Up” fetches the Palm's RAM databases to the Mac after the installs – all of them the first time, then only the changed ones. For a slow serial tab, “Install Only” can make sense."
@@ -590,6 +588,10 @@ enum L10n {
         "Dieser Palm hat Palm OS \(version). Der Abgleich von Kalender, Kontakten und Aufgaben und die Zeitzonen brauchen die Garnet-Programme ab Palm OS 5.2 (Tungsten T3 und neuer); Installieren, Sichern und Zurückspielen gehen wie immer.",
         "This Palm runs Palm OS \(version). Syncing Calendar, Contacts and Tasks and the time zones need the Garnet applications of Palm OS 5.2 and later (Tungsten T3 onwards); install, backup and restore work as always."
     ) }
+    static func logTwoWayMirrorBroken(_ what: String, _ file: String, _ reason: String) -> String { s(
+        "\(what): der Spiegel \(file) lässt sich nicht lesen (\(reason)) – Abgleich ausgelassen; Datei prüfen oder beiseitelegen, dann paart der nächste HotSync nach Inhalt",
+        "\(what): the mirror \(file) cannot be read (\(reason)) – sync skipped; check or set the file aside, then the next HotSync pairs by content"
+    ) }
     static var logDryRun: String { s("Probelauf: die Abgleiche schreiben nichts", "Dry run: the syncs write nothing") }
     static var logDryRunClock: String { s("Probelauf: die Uhr des Palms würde gestellt", "Dry run: the Palm's clock would be set") }
     static func logDryRunWouldInstall(_ name: String, _ records: Int, _ bytes: Int) -> String { s(
@@ -618,8 +620,8 @@ enum L10n {
     ) }
     static func logTwoWayReading(_ what: String) -> String { s("\(what): lese vom Palm …", "\(what): reading from the Palm …") }
     static func logTwoWayMode(_ what: String, fast: Bool, lastSyncPC: UInt32, mirrorEntries: Int) -> String { s(
-        fast ? "\(what): schneller Abgleich möglich (Spiegel mit \(mirrorEntries) Einträgen, letzter PC passt)" : "\(what): langsamer Abgleich (Spiegel: \(mirrorEntries) Einträge, letzter PC \(lastSyncPC)); Datensätze werden nach Inhalt gepaart",
-        fast ? "\(what): a fast sync will do (mirror with \(mirrorEntries) entries, last PC matches)" : "\(what): slow sync (mirror: \(mirrorEntries) entries, last PC \(lastSyncPC)); records are paired by content"
+        fast ? "\(what): zuletzt hat dieser Mac abgeglichen (Spiegel mit \(mirrorEntries) Einträgen): Löschungen auf dem Palm zählen" : "\(what): zuletzt ein anderer PC oder keiner (Spiegel: \(mirrorEntries) Einträge, letzter PC \(lastSyncPC)): Datensätze werden nach Inhalt gepaart, auf dem Mac wird nichts gelöscht",
+        fast ? "\(what): this Mac synced last (mirror with \(mirrorEntries) entries): the Palm's deletions count" : "\(what): another PC or none synced last (mirror: \(mirrorEntries) entries, last PC \(lastSyncPC)): records are paired by content, nothing is deleted on the Mac"
     ) }
     static func logTwoWaySummary(_ what: String, toPalm: Int, palmDeletes: Int, toMac: Int, macDeletes: Int, conflicts: Int, policy: ConflictPolicy) -> String { s(
         "\(what): \(toPalm) auf den Palm, \(palmDeletes) dort löschen; \(toMac) auf den Mac, \(macDeletes) dort löschen; \(conflicts) Konflikte (\(conflictPolicyName(policy)))",
@@ -884,12 +886,6 @@ enum L10n {
     static var backupMenu: String { s("Sicherung", "Backup") }
     static var backupMenuHelp: String { s("Sicherung dieses Palms: zurückspielen, im Finder zeigen", "This Palm's backup: restore, show in the Finder") }
     static var tabSyncModeLabel: String { s("HotSync:", "HotSync:") }
-    static func allTabsSyncMode(full: Bool) -> String {
-        full ? s("Alle Tabs: Installieren + Sichern", "All Tabs: Install + Back Up")
-             : s("Alle Tabs: Nur installieren", "All Tabs: Install Only")
-    }
-    static var tabSyncModeFullShort: String { s("Installieren + Sichern", "Install + Back Up") }
-    static var tabSyncModeInstallShort: String { s("Nur installieren", "Install Only") }
     static var backupRestoreNext: String { s("Beim nächsten HotSync zurückspielen …", "Restore at the next HotSync …") }
     static var backupRestoreCancel: String { s("Zurückspielen abbrechen", "Cancel the restore") }
     static var backupOpenFolder: String { s("Sicherung im Finder zeigen", "Show the backup in the Finder") }

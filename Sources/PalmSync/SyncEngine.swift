@@ -126,6 +126,16 @@ public struct SyncPlan<Item: SyncedItem>: Equatable, Sendable {
         public var key: MacKey?
         public var item: Item
         public var entry: Int
+        /// For an update: the fields that differ from what the Mac holds
+        /// now, so the writer touches nothing else. Empty for a create.
+        public var changed: [Item.Field] = []
+
+        public init(key: MacKey?, item: Item, entry: Int, changed: [Item.Field] = []) {
+            self.key = key
+            self.item = item
+            self.entry = entry
+            self.changed = changed
+        }
     }
 
     /// The mirror entries after this sync; the Palm ID or Mac key of a new
@@ -194,12 +204,14 @@ public struct SyncPlan<Item: SyncedItem>: Equatable, Sendable {
         -> (records: [PalmDatabase.Record], palmIDs: [Int: UInt32], categories: CategoryAppInfo, nextID: UInt32) {
         var categories = existing
         func index(of name: String) -> Int {
-            if let i = categories.names.firstIndex(of: name) { return i }
+            let short = String(name.prefix(CategoryAppInfo.nameWidth - 1))
+            if let i = categories.names.firstIndex(of: short) { return i }
             if let free = categories.names.indices.dropFirst().first(where: { categories.names[$0].isEmpty }) {
-                categories.names[free] = String(name.prefix(CategoryAppInfo.nameWidth - 1))
+                categories.names[free] = short
                 return free
             }
-            return 0
+            // no slot left: "Other" (made if a slot frees up later), else Unfiled
+            return categories.names.firstIndex(of: "Other") ?? 0
         }
 
         var nextID = (entries.compactMap(\.palmID).max() ?? 0) + 1
@@ -415,7 +427,8 @@ public struct SyncEngine<Item: SyncedItem> {
                     writePalm(base, id: entry.palmID, over: palmBytes, mac: entry.mac, macOwned: true, secret: secret)
                 } else {
                     plan.entries.append(.init(palmID: entry.palmID, mac: entry.mac, item: item, palmRecord: palmBytes, macOwned: false, secret: secret))
-                    plan.macUpdates.append(.init(key: entry.mac, item: item, entry: plan.entries.count - 1))
+                    plan.macUpdates.append(.init(key: entry.mac, item: item, entry: plan.entries.count - 1,
+                                                 changed: Self.fields(of: item, differingFrom: base)))
                 }
 
             case (.same, .changed(let item)):
@@ -442,7 +455,8 @@ public struct SyncEngine<Item: SyncedItem> {
                     plan.entries.append(.init(palmID: entry.palmID, mac: entry.mac, item: merged, palmRecord: palmBytes, macOwned: false, secret: secret))
                 }
                 if merged != macVersion {
-                    plan.macUpdates.append(.init(key: entry.mac, item: merged, entry: plan.entries.count - 1))
+                    plan.macUpdates.append(.init(key: entry.mac, item: merged, entry: plan.entries.count - 1,
+                                                 changed: Self.fields(of: merged, differingFrom: macVersion)))
                 }
 
             case (.deleted, .deleted), (.deleted, .archived), (.same, .archived), (.changed, .archived):
@@ -501,6 +515,10 @@ public struct SyncEngine<Item: SyncedItem> {
         }
 
         return plan
+    }
+
+    static func fields(of a: Item, differingFrom b: Item) -> [Item.Field] {
+        Item.Field.allCases.filter { a.differs(from: b, in: $0) }
     }
 
     /// Field by field against the base; a field both changed goes to the
