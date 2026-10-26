@@ -975,8 +975,11 @@ static void read_records(int sd, int modified_only)
 			}
 			emit_record(id, index, attrs, category, buf);
 			count++;
-			if (!pi_socket_connected(sd))
-				break;
+			if (!pi_socket_connected(sd)) {
+				emit_error(stage, "connection lost while reading records");
+				pi_buffer_free(buf);
+				return;
+			}
 		}
 	} else {
 		if (dlp_ReadOpenDBInfo(sd, open_db, &total) < 0) {
@@ -992,8 +995,11 @@ static void read_records(int sd, int modified_only)
 			}
 			emit_record(id, index, attrs, category, buf);
 			count++;
-			if (!pi_socket_connected(sd))
-				break;
+			if (!pi_socket_connected(sd)) {
+				emit_error(stage, "connection lost while reading records");
+				pi_buffer_free(buf);
+				return;
+			}
 		}
 	}
 	pi_buffer_free(buf);

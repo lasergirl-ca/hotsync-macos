@@ -48,7 +48,19 @@ public final class ContactSource: @unchecked Sendable {
     /// Every contact of the given accounts, with its groups. The note is not
     /// read: macOS hands it out only to apps with an entitlement Apple grants
     /// on request, so it stays on the Mac.
+    public enum Failure: Error, LocalizedError {
+        case containerMissing(String)
+        public var errorDescription: String? {
+            switch self {
+            case .containerMissing(let id): return "a chosen account no longer exists (\(id)); choose the accounts again"
+            }
+        }
+    }
+
     public func contacts(in containerIDs: [String]) throws -> [MacContact] {
+        // an account that is gone is an error, not an empty account
+        let existing = Set((try store.containers(matching: nil)).map(\.identifier))
+        if let gone = containerIDs.first(where: { !existing.contains($0) }) { throw Failure.containerMissing(gone) }
         let keys: [CNKeyDescriptor] = [
             CNContactIdentifierKey, CNContactGivenNameKey, CNContactMiddleNameKey, CNContactFamilyNameKey,
             CNContactOrganizationNameKey, CNContactJobTitleKey, CNContactPhoneNumbersKey, CNContactEmailAddressesKey,

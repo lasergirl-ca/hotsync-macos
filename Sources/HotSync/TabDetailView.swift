@@ -762,6 +762,16 @@ struct DryRunSection: View {
                     .font(.caption)
                     .foregroundStyle(on ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
                     .fixedSize(horizontal: false, vertical: true)
+                Toggle(isOn: Binding(
+                    get: { appState.deviceManager.profile(profileId)?.isMassDeleteAllowed ?? false },
+                    set: { appState.setAllowMassDelete($0, for: profileId) }
+                )) {
+                    Text(L10n.massDeleteToggle)
+                }
+                Text(L10n.massDeleteHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(4)

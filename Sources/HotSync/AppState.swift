@@ -652,8 +652,13 @@ final class AppState {
         /// wird, und der Spiegel, der danach gespeichert wird (liefert die Zahl
         /// seiner Einträge); der PC, der dann als letzter eingetragen wird
         var twoWayInstall: URL?
-        var twoWayMirrorSave: (() throws -> Int)?
+        /// nach dem Installieren: die Mac-Seite schreiben und den Spiegel
+        /// speichern (liefert die Zahl seiner Einträge)
+        var twoWayAfterInstall: (() throws -> Int)?
         var twoWayPCID: UInt32 = 0
+        /// wie viele Datensätze der Palm beim Öffnen gemeldet hat: weniger
+        /// gelesen heißt abgebrochen, nicht gelöscht
+        var twoWayExpected = -1
         var restoreFiles: [URL] = []
         var restoreDone = 0
         var restoreFailed = 0
@@ -758,16 +763,26 @@ final class AppState {
         // Kalender in beide Richtungen (Probelauf): lesen, planen, schließen
         case .syncInfo(let pc, _):
             session.lastSyncPC = pc
-        case .dbOpened where session.stage == .twoWayCalendar:
+        case .dbOpened(_, let records) where session.stage == .twoWayCalendar:
+            session.twoWayExpected = records
             session.runner.send("readappinfo")
         case .appInfo(let data) where session.stage == .twoWayCalendar:
             session.calendarAppInfo = data
             session.runner.send("readall")
         case .record(let id, _, let attrs, let category, let data) where session.stage == .twoWayCalendar:
             session.calendarRecords.append(PalmRecordIn(id: id, attributes: attrs, category: category, data: data))
-        case .recordsDone where session.stage == .twoWayCalendar:
-            twoWayPlanned(session)
-            if session.twoWayCurrent != TasksBuilder.databaseName { session.runner.send("closedb") }
+        case .recordsDone(let count, _) where session.stage == .twoWayCalendar:
+            if session.twoWayExpected >= 0 && count != session.twoWayExpected {
+                // weniger als angekündigt: die Lesung ist unvollständig, ein
+                // Abgleich darauf hielte fehlende Datensätze für gelöscht
+                if let tabId = session.tabId {
+                    tabLog(tabId, L10n.logTwoWayTruncated(twoWayName(session.twoWayCurrent ?? ""), count, session.twoWayExpected))
+                }
+                session.runner.send("closedb")
+            } else {
+                twoWayPlanned(session)
+                if session.twoWayCurrent != TasksBuilder.databaseName { session.runner.send("closedb") }
+            }
         case .dbClosed where session.stage == .twoWayCalendar:
             if let url = session.twoWayInstall {
                 session.twoWayInstall = nil
@@ -780,8 +795,10 @@ final class AppState {
         case .installed where session.stage == .twoWayCalendar:
             twoWayInstalled(session)
         case .failed(_, let failure) where session.stage == .twoWayCalendar:
+            // der Palm hat die Datenbank nicht bekommen: auf dem Mac bleibt
+            // alles, wie es war, der Spiegel auch
             if let tabId = session.tabId { tabLog(tabId, L10n.logTwoWayFailed(L10n.failureText(failure))) }
-            session.twoWayMirrorSave = nil
+            session.twoWayAfterInstall = nil
             twoWayNext(session)
         case .syncInfoWritten where session.stage == .twoWayCalendar:
             if let tabId = session.tabId { tabLog(tabId, L10n.logTwoWayDone) }
@@ -1008,6 +1025,12 @@ final class AppState {
         profile.contactSync = settings
         deviceManager.updateProfile(profile)
         refreshContactPreview(for: profileId)
+    }
+
+    func setAllowMassDelete(_ on: Bool, for profileId: UUID) {
+        guard var profile = deviceManager.profile(profileId) else { return }
+        profile.allowMassDelete = on
+        deviceManager.updateProfile(profile)
     }
 
     func setDryRun(_ on: Bool, for profileId: UUID) {
@@ -1275,6 +1298,13 @@ final class AppState {
         deviceManager.updateRomVersion(session.romVersion, for: profileId)
         if restoreRequests.remove(profileId) != nil {
             session.restoreFiles = backupFiles(for: profileId)
+            // Nach dem Zurückspielen hat der Palm den Stand der Sicherung,
+            // der Spiegel den letzten Abgleich: ein Abgleich jetzt hielte
+            // alles seither für gelöscht. Beim nächsten HotSync wieder.
+            if !session.twoWayDatabases.isEmpty {
+                session.twoWayDatabases = []
+                tabLog(tabId, L10n.logTwoWayRestoreSkipped)
+            }
         }
         session.romRequested = romRequests.remove(profileId) != nil
         // Nach dem Zurückspielen nicht gleich wieder sichern: der Palm hat
@@ -1479,7 +1509,8 @@ final class AppState {
         session.calendarAppInfo = nil
         session.calendarRecords = []
         session.twoWayInstall = nil
-        session.twoWayMirrorSave = nil
+        session.twoWayAfterInstall = nil
+        session.twoWayExpected = -1
         session.stage = .twoWayCalendar
         statuses[tabId]?.phase = .readingCalendar(user: user, database: name, done: 0)
         tabLog(tabId, L10n.logTwoWayReading(twoWayName(name)))
@@ -1512,10 +1543,10 @@ final class AppState {
     /// außer im Probelauf die Mac-Seite schreiben und die zusammengeführte
     /// Datenbank zum Installieren bereitlegen.
     private func twoWayRun<Item: SyncedItem>(
-        _ session: Session, profile: DeviceProfile, what: String, mirrorFile: String, engine: SyncEngine<Item>,
+        _ session: Session, profile: DeviceProfile, what: String, mirrorFile: String, engine given: SyncEngine<Item>,
         palmCategories: [String], mac: [MacSyncItem<Item>],
         titleOf: (Data) -> String?,
-        applyMac: (SyncPlan<Item>) -> (createdKeys: [Int: MacKey], updated: Int, deleted: Int, failures: [String]),
+        applyMac: @escaping (SyncPlan<Item>) -> (createdKeys: [Int: MacKey], updated: Int, deleted: Int, failures: [String], failedEntries: [Int]),
         palmDatabase: (SyncPlan<Item>) -> (database: PalmDatabase, palmIDs: [Int: UInt32])
     ) {
         guard let tabId = session.tabId else { return }
@@ -1523,6 +1554,12 @@ final class AppState {
         let mirror = (try? SyncMirror<Item>.load(from: url)) ?? SyncMirror<Item>(pcID: SyncMirror<Item>.newPCID())
         let fast = mirror.lastSync != nil && session.lastSyncPC == mirror.pcID
         tabLog(tabId, L10n.logTwoWayMode(what, fast: fast, lastSyncPC: session.lastSyncPC, mirrorEntries: mirror.entries.count))
+        // Nur wenn zuletzt dieser Mac abgeglichen hat, heißt "fehlt auf dem
+        // Palm" auch "dort gelöscht". Sonst (Hard Reset, anderer PC, halb
+        // installierte Datenbank) wird auf dem Mac nichts gelöscht.
+        var engine = given
+        engine.palmDeletesTrusted = fast
+        if !fast, !mirror.entries.isEmpty { tabLog(tabId, L10n.logTwoWayDeletesUntrusted(what)) }
         // es wird immer alles gelesen; mit DateFix in echten Jahren
         let kind = DateFix.Kind(creator: session.twoWayCurrent == ContactsBuilder.databaseName ? "PAdd"
                                 : session.twoWayCurrent == TasksBuilder.databaseName ? "PTod" : "PDat")!
@@ -1558,22 +1595,44 @@ final class AppState {
                 tabLog(tabId, L10n.logTwoWayDryRunDone)
                 return
             }
-            let result = applyMac(plan)
-            tabLog(tabId, L10n.logTwoWayMacApplied(result.createdKeys.count, result.updated, result.deleted))
-            for failure in result.failures.prefix(10) { tabLog(tabId, L10n.logTwoWayMacFailure(failure)) }
+            // Viele Löschungen auf einmal sind eher ein Fehler (leere Quelle,
+            // falsche Datenbank) als Absicht: nur mit ausdrücklicher Erlaubnis
+            if let mass = plan.massDeletion(mirrorEntries: mirror.entries.count) {
+                guard profile.isMassDeleteAllowed else {
+                    tabLog(tabId, L10n.logTwoWayMassRefused(what, mac: mass.mac, palm: mass.palm, mirror: mirror.entries.count))
+                    return
+                }
+                tabLog(tabId, L10n.logTwoWayMassAllowed(what, mac: mass.mac, palm: mass.palm))
+                setAllowMassDelete(false, for: profile.id)   // gilt für diesen einen HotSync
+            }
 
+            // Erst der Palm (die zusammengeführte Datenbank, nach dem Schließen
+            // installiert), dann der Mac, dann der Spiegel: schlägt die
+            // Installation fehl, ist auf dem Mac nichts passiert.
             let (db, palmIDs) = palmDatabase(plan)
-            let after = plan.mirror(after: mirror, palmIDs: palmIDs, macKeys: result.createdKeys)
             let dbURL = mirrorURL("\(db.name).pdb", for: profile)
             _ = try writeDatabase(db, to: dbURL, dateFixYears: session.dateFixYears)
             session.twoWayInstall = dbURL
-            session.twoWayPCID = after.pcID
-            session.twoWayMirrorSave = { try after.save(to: url); return after.entries.count }
+            session.twoWayPCID = mirror.pcID
+            session.twoWayAfterInstall = { [weak self] in
+                let result = applyMac(plan)
+                self?.tabLog(tabId, L10n.logTwoWayMacApplied(result.createdKeys.count, result.updated, result.deleted))
+                for failure in result.failures.prefix(10) { self?.tabLog(tabId, L10n.logTwoWayMacFailure(failure)) }
+                // was auf dem Mac nicht geschrieben wurde, behält im Spiegel den
+                // alten Stand und kommt beim nächsten Mal wieder dran
+                var kept = plan
+                for i in result.failedEntries where i < kept.entries.count {
+                    if let palmID = kept.entries[i].palmID, let base = bases[palmID] { kept.entries[i].item = base }
+                }
+                let after = kept.mirror(after: mirror, palmIDs: palmIDs, macKeys: result.createdKeys)
+                try after.save(to: url)
+                return after.entries.count
+            }
             tabLog(tabId, L10n.logTwoWayPalmInstalling(what, db.records.count))
         } catch {
             tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
             session.twoWayInstall = nil
-            session.twoWayMirrorSave = nil
+            session.twoWayAfterInstall = nil
         }
     }
 
@@ -1589,7 +1648,11 @@ final class AppState {
         let today = calendar.startOfDay(for: Date())
         let windowStart = calendar.date(byAdding: .day, value: -settings.daysBack, to: today)!
         let windowEnd = calendar.date(byAdding: .day, value: settings.daysAhead, to: today)!
-        let events = calendarSource.events(from: windowStart, to: windowEnd, calendarIDs: settings.calendars.map(\.id))
+        let events: [MacEvent]
+        do { events = try calendarSource.events(from: windowStart, to: windowEnd, calendarIDs: settings.calendars.map(\.id)) } catch {
+            tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
+            return
+        }
         let builder = CalendarBuilder(options: .init(homeZone: .current, windowStart: windowStart, windowEnd: windowEnd,
                                                      calendars: settings.macCalendars, startOfWeek: startOfWeek))
         let (start, end) = (PalmDate(windowStart, in: calendar), PalmDate(windowEnd, in: calendar))
@@ -1608,7 +1671,7 @@ final class AppState {
                   titleOf: { (try? CalendarEvent(data: $0))?.title },
                   applyMac: { plan in
                       let r = writer.apply(plan)
-                      return (r.createdKeys, r.updated, r.deleted, r.failures)
+                      return (r.createdKeys, r.updated, r.deleted, r.failures, r.failedEntries)
                   },
                   palmDatabase: { plan in
                       let (db, ids, _) = plan.palmDatabase(categories: appInfo?.categories ?? CategoryAppInfo(), startOfWeek: startOfWeek)
@@ -1640,7 +1703,7 @@ final class AppState {
                   titleOf: { (try? Contact(data: $0)).map { SyncedContact($0, category: "").title ?? "" } },
                   applyMac: { plan in
                       let r = writer.apply(plan)
-                      return (r.createdKeys, r.updated, r.deleted, r.failures)
+                      return (r.createdKeys, r.updated, r.deleted, r.failures, r.failedEntries)
                   },
                   palmDatabase: { plan in
                       let (db, ids, _) = plan.palmDatabase(appInfo: appInfo)
@@ -1665,7 +1728,12 @@ final class AppState {
             calendar.timeZone = .current
             let today = PalmDate(Date(), in: calendar)
             let startOfWeek: UInt8 = Foundation.Calendar.current.firstWeekday == 2 ? 1 : 0
-            let reminders = await self.reminderSource.reminders(in: settings.lists.map(\.id))
+            let reminders: [MacReminder]
+            do { reminders = try await self.reminderSource.reminders(in: settings.lists.map(\.id)) } catch {
+                self.tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
+                session.runner.send("closedb")
+                return
+            }
             let builder = TasksBuilder(options: .init(lists: settings.lists.map { .init(id: $0.id, title: $0.title) },
                                                       keepCompletedDays: settings.keepCompletedDays, today: today,
                                                       startOfWeek: startOfWeek))
@@ -1680,7 +1748,7 @@ final class AppState {
                            titleOf: { (try? PalmTask(data: $0))?.title },
                            applyMac: { plan in
                                let r = writer.apply(plan)
-                               return (r.createdKeys, r.updated, r.deleted, r.failures)
+                               return (r.createdKeys, r.updated, r.deleted, r.failures, r.failedEntries)
                            },
                            palmDatabase: { plan in
                                let (db, ids, _) = plan.palmDatabase(appInfo: appInfo)
@@ -1693,10 +1761,10 @@ final class AppState {
     /// Die zusammengeführte Datenbank ist auf dem Palm: Spiegel speichern,
     /// diesen Mac als letzten PC eintragen.
     private func twoWayInstalled(_ session: Session) {
-        guard let tabId = session.tabId, let save = session.twoWayMirrorSave else { return }
-        session.twoWayMirrorSave = nil
+        guard let tabId = session.tabId, let finish = session.twoWayAfterInstall else { return }
+        session.twoWayAfterInstall = nil
         do {
-            let entries = try save()
+            let entries = try finish()
             tabLog(tabId, L10n.logTwoWayMirrorSaved(entries))
         } catch {
             tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))

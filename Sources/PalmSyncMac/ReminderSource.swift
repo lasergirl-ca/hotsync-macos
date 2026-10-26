@@ -36,14 +36,21 @@ public final class ReminderSource: @unchecked Sendable {
     }
 
     /// Every reminder of the given lists, open and completed alike (the
-    /// builder decides how long completed ones stay).
-    public func reminders(in listIDs: [String], homeZone: TimeZone = .current) async -> [MacReminder] {
-        let lists = listIDs.compactMap { store.calendar(withIdentifier: $0) }
+    /// builder decides how long completed ones stay). A list that no longer
+    /// exists, or a fetch that returns nothing at all, is an error: the sync
+    /// must not take it for "everything deleted".
+    public func reminders(in listIDs: [String], homeZone: TimeZone = .current) async throws -> [MacReminder] {
+        var lists: [EKCalendar] = []
+        for id in listIDs {
+            guard let list = store.calendar(withIdentifier: id) else { throw CalendarSource.Failure.calendarMissing(id) }
+            lists.append(list)
+        }
         guard !lists.isEmpty else { return [] }
         let predicate = store.predicateForReminders(in: lists)
-        let found: [EKReminder] = await withCheckedContinuation { continuation in
-            store.fetchReminders(matching: predicate) { continuation.resume(returning: $0 ?? []) }
+        let fetched: [EKReminder]? = await withCheckedContinuation { continuation in
+            store.fetchReminders(matching: predicate) { continuation.resume(returning: $0) }
         }
+        guard let found = fetched else { throw CalendarSource.Failure.fetchFailed }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = homeZone
         return found.map { Self.macReminder($0, calendar: calendar) }
@@ -144,7 +151,7 @@ public struct TaskSyncRun {
 
     public init(settings: TaskSyncSettings, source: ReminderSource, homeZone: TimeZone = .current, now: Date = Date()) async throws {
         guard source.hasAccess else { throw Failure.noAccess }
-        let found = await source.reminders(in: settings.lists.map(\.id), homeZone: homeZone)
+        let found = try await source.reminders(in: settings.lists.map(\.id), homeZone: homeZone)
         reminders = found.count
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = homeZone

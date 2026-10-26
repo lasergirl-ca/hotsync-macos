@@ -13,6 +13,9 @@ public struct ContactWriter {
         public var updated = 0
         public var deleted = 0
         public var failures: [String] = []
+        /// Entry indices of creates and updates that did not happen, so the
+        /// mirror keeps the old base for them and they are retried.
+        public var failedEntries: [Int] = []
     }
 
     public let store: CNContactStore
@@ -172,12 +175,14 @@ public struct ContactWriter {
                 result.createdKeys[change.entry] = MacKey(seriesID: c.identifier)
             } catch {
                 result.failures.append("\(change.item.title ?? "?"): \(error.localizedDescription)")
+                result.failedEntries.append(change.entry)
             }
         }
 
         for change in plan.macUpdates {
             guard let key = change.key, let existing = find(key) else {
                 result.failures.append("\(change.item.title ?? "?"): not found on the Mac any more")
+                result.failedEntries.append(change.entry)
                 continue
             }
             let c = existing.mutableCopy() as! CNMutableContact
@@ -190,6 +195,7 @@ public struct ContactWriter {
                 result.updated += 1
             } catch {
                 result.failures.append("\(change.item.title ?? "?"): \(error.localizedDescription)")
+                result.failedEntries.append(change.entry)
             }
         }
 

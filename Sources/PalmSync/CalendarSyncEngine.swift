@@ -24,17 +24,19 @@ public struct CalendarSyncEngine {
     public var windowStart: PalmDate
     public var windowEnd: PalmDate
     public var conflictPolicy: ConflictPolicy
+    public var palmDeletesTrusted: Bool
 
-    public init(windowStart: PalmDate, windowEnd: PalmDate, conflictPolicy: ConflictPolicy = .macWins) {
+    public init(windowStart: PalmDate, windowEnd: PalmDate, conflictPolicy: ConflictPolicy = .macWins, palmDeletesTrusted: Bool = true) {
         self.windowStart = windowStart
         self.windowEnd = windowEnd
         self.conflictPolicy = conflictPolicy
+        self.palmDeletesTrusted = palmDeletesTrusted
     }
 
     public func plan(palm snapshot: PalmSnapshot, palmCategories: [String], mac items: [CalendarBuilder.MacItem],
                      mirror: CalendarMirror) throws -> CalendarSyncPlan {
         let (start, end) = (windowStart, windowEnd)
-        let engine = SyncEngine<SyncedEvent>(conflictPolicy: conflictPolicy) { $0.date >= start && $0.date <= end }
+        let engine = SyncEngine<SyncedEvent>(conflictPolicy: conflictPolicy, palmDeletesTrusted: palmDeletesTrusted) { $0.date >= start && $0.date <= end }
         let mac = items.map {
             MacSyncItem(key: $0.key, item: SyncedEvent($0.event, category: $0.category), macOwned: $0.macOwned,
                         palmRecord: $0.event.encode())

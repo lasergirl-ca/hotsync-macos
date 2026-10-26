@@ -555,6 +555,33 @@ enum L10n {
     static var logWakeRestart: String { s(
         "Aufgewacht: Listener werden neu gestartet", "Woke up: restarting the listeners"
     ) }
+    static var massDeleteToggle: String { s(
+        "Viele Löschungen beim nächsten Abgleich zulassen", "Allow many deletions at the next sync"
+    ) }
+    static var massDeleteHint: String { s(
+        "Ein Abgleich, der zehn oder mehr Einträge (oder ein Fünftel) auf einer Seite löschen würde, wird sonst verweigert – meist steckt eine leere Quelle oder ein zurückgesetzter Palm dahinter, keine Absicht. Gilt für einen HotSync und schaltet sich danach aus.",
+        "A sync that would delete ten or more items (or a fifth) on one side is otherwise refused – usually that is an empty source or a reset Palm, not intent. Applies to one HotSync and switches itself off afterwards."
+    ) }
+    static func logTwoWayTruncated(_ what: String, _ got: Int, _ expected: Int) -> String { s(
+        "\(what): nur \(got) von \(expected) Datensätzen gelesen – Abgleich ausgelassen, nichts geändert",
+        "\(what): only \(got) of \(expected) records read – sync skipped, nothing changed"
+    ) }
+    static func logTwoWayDeletesUntrusted(_ what: String) -> String { s(
+        "\(what): zuletzt hat ein anderer PC abgeglichen (oder der Palm wurde zurückgesetzt): auf dem Mac wird nichts gelöscht, was auf dem Palm fehlt, kommt dorthin zurück",
+        "\(what): another PC synced last (or the Palm was reset): nothing is deleted on the Mac, what the Palm lacks goes back to it"
+    ) }
+    static func logTwoWayMassRefused(_ what: String, mac: Int, palm: Int, mirror: Int) -> String { s(
+        "\(what): verweigert – \(mac) Einträge würden auf dem Mac gelöscht, \(palm) auf dem Palm (Spiegel: \(mirror)). Prüfen, dann „Viele Löschungen zulassen“ einschalten, wenn das stimmt",
+        "\(what): refused – \(mac) items would be deleted on the Mac, \(palm) on the Palm (mirror: \(mirror)). Check, then turn on “Allow many deletions” if that is right"
+    ) }
+    static func logTwoWayMassAllowed(_ what: String, mac: Int, palm: Int) -> String { s(
+        "\(what): \(mac) Löschungen auf dem Mac, \(palm) auf dem Palm – wie erlaubt; der Schalter ist wieder aus",
+        "\(what): \(mac) deletions on the Mac, \(palm) on the Palm – as allowed; the switch is off again"
+    ) }
+    static var logTwoWayRestoreSkipped: String { s(
+        "Abgleich in beide Richtungen in dieser Sitzung ausgelassen: nach dem Zurückspielen beim nächsten HotSync",
+        "Two-way sync skipped in this session: after a restore, at the next HotSync"
+    ) }
     static var logDryRun: String { s("Probelauf: die Abgleiche schreiben nichts", "Dry run: the syncs write nothing") }
     static var logDryRunClock: String { s("Probelauf: die Uhr des Palms würde gestellt", "Dry run: the Palm's clock would be set") }
     static func logDryRunWouldInstall(_ name: String, _ records: Int, _ bytes: Int) -> String { s(

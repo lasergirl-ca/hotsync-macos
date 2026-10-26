@@ -320,3 +320,43 @@ private func syncedMirror() -> CalendarMirror {
     let mirror = plan.mirror(after: syncedMirror(), palmIDs: [copy: 0x1002], macKeys: [copy: MacKey(seriesID: "copy")])
     #expect(mirror.entries.count == 2)
 }
+
+// MARK: - Palm deletions trusted or not
+
+@Test func untrustedPalmDeletionsPutTheRecordBack() throws {
+    // the Palm was hard-reset (or another PC synced): a mirrored record is gone there
+    var cautious = engine
+    cautious.conflictPolicy = .macWins
+    let mac = items([macEvent("Standup", standupStart)])
+    let mirror = syncedMirror()
+
+    let trusting = try engine.plan(palm: .all([]), palmCategories: palmCategories, mac: mac, mirror: mirror)
+    #expect(trusting.macDeletes == [mirror.entries[0].mac] && trusting.palmWrites.isEmpty)
+
+    var untrusting = cautious
+    untrusting.palmDeletesTrusted = false
+    let plan = try untrusting.plan(palm: .all([]), palmCategories: palmCategories, mac: mac, mirror: mirror)
+    #expect(plan.macDeletes.isEmpty)
+    #expect(plan.palmWrites.count == 1 && plan.palmWrites[0].id == nil)
+    #expect(event(plan.palmWrites[0].record).title == "Standup")
+    #expect(plan.log.contains { $0.contains("put back") })
+    // deleted on the Mac as well: gone, no resurrection
+    let gone = try untrusting.plan(palm: .all([]), palmCategories: palmCategories, mac: [], mirror: mirror)
+    #expect(gone.palmWrites.isEmpty && gone.macDeletes.isEmpty && gone.entries.isEmpty)
+}
+
+@Test func massDeletionThresholds() {
+    var plan = CalendarSyncPlan()
+    #expect(plan.massDeletion(mirrorEntries: 100) == nil)
+    plan.macDeletes = (0..<9).map { MacKey(seriesID: "\($0)") }
+    #expect(plan.massDeletion(mirrorEntries: 100) == nil)          // 9 of 100: housekeeping
+    plan.macDeletes.append(MacKey(seriesID: "9"))
+    #expect(plan.massDeletion(mirrorEntries: 100)?.mac == 10)      // ten: a lot, whatever the mirror
+    var small = CalendarSyncPlan()
+    small.palmDeletes = [1, 2, 3]
+    #expect(small.massDeletion(mirrorEntries: 12)?.palm == 3)      // 3 of 12 is a quarter
+    #expect(small.massDeletion(mirrorEntries: 40) == nil)          // 3 of 40 is not
+    var two = CalendarSyncPlan()
+    two.palmDeletes = [1, 2]
+    #expect(two.massDeletion(mirrorEntries: 2) == nil)             // fewer than three never count
+}

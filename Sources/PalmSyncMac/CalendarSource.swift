@@ -42,13 +42,45 @@ public final class CalendarSource: @unchecked Sendable {
             .sorted { ($0.source, $0.title) < ($1.source, $1.title) }
     }
 
-    /// Every occurrence in the window from the given calendars; calendars
-    /// that no longer exist are skipped.
-    public func events(from start: Date, to end: Date, calendarIDs: [String]) -> [MacEvent] {
-        let calendars = calendarIDs.compactMap { store.calendar(withIdentifier: $0) }
+    public enum Failure: Error, LocalizedError {
+        /// A chosen calendar or list is gone (account signed out, identifiers
+        /// changed): the sync must not take that for "everything deleted".
+        case calendarMissing(String)
+        case fetchFailed
+
+        public var errorDescription: String? {
+            switch self {
+            case .calendarMissing(let id): return "a chosen calendar no longer exists (\(id)); choose the calendars again"
+            case .fetchFailed: return "the Mac's store returned nothing"
+            }
+        }
+    }
+
+    /// Every occurrence in the window from the given calendars. A calendar
+    /// that no longer exists is an error, not an empty calendar. EventKit
+    /// answers at most four years per predicate, so the window is fetched
+    /// in pieces.
+    public func events(from start: Date, to end: Date, calendarIDs: [String]) throws -> [MacEvent] {
+        var calendars: [EKCalendar] = []
+        for id in calendarIDs {
+            guard let calendar = store.calendar(withIdentifier: id) else { throw Failure.calendarMissing(id) }
+            calendars.append(calendar)
+        }
         guard !calendars.isEmpty else { return [] }
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: calendars)
-        return store.events(matching: predicate).map(Self.macEvent)
+        let piece: TimeInterval = 3 * 365 * 86400
+        var found: [EKEvent] = []
+        var from = start
+        while from < end {
+            let to = min(end, from.addingTimeInterval(piece))
+            found += store.events(matching: store.predicateForEvents(withStart: from, end: to, calendars: calendars))
+            from = to
+        }
+        // an occurrence spanning a piece boundary comes back twice
+        var seen = Set<String>()
+        return found.compactMap { e in
+            let key = e.calendarItemIdentifier + "|" + String(e.occurrenceDate?.timeIntervalSinceReferenceDate ?? 0)
+            return seen.insert(key).inserted ? Self.macEvent(e) : nil
+        }
     }
 
     // MARK: EventKit to MacEvent
@@ -160,7 +192,7 @@ public struct CalendarSyncRun {
         let today = calendar.startOfDay(for: now)
         windowStart = calendar.date(byAdding: .day, value: -settings.daysBack, to: today)!
         windowEnd = calendar.date(byAdding: .day, value: settings.daysAhead, to: today)!
-        let events = source.events(from: windowStart, to: windowEnd, calendarIDs: settings.calendars.map(\.id))
+        let events = try source.events(from: windowStart, to: windowEnd, calendarIDs: settings.calendars.map(\.id))
         occurrences = events.count
         let builder = CalendarBuilder(options: .init(
             homeZone: homeZone, windowStart: windowStart, windowEnd: windowEnd, calendars: settings.macCalendars,

@@ -153,6 +153,14 @@ public struct SyncPlan<Item: SyncedItem>: Equatable, Sendable {
         palmWrites.isEmpty && palmDeletes.isEmpty && macCreates.isEmpty && macUpdates.isEmpty && macDeletes.isEmpty
     }
 
+    /// Deletions large enough to be a mistake rather than housekeeping: ten
+    /// or more on one side, or three or more that are a fifth of what the
+    /// mirror holds. The caller refuses to apply such a plan unless told to.
+    public func massDeletion(mirrorEntries: Int) -> (mac: Int, palm: Int)? {
+        func mass(_ n: Int) -> Bool { n >= 10 || (n >= 3 && n * 5 >= mirrorEntries) }
+        return mass(macDeletes.count) || mass(palmDeletes.count) ? (macDeletes.count, palmDeletes.count) : nil
+    }
+
     /// The mirror once the plan was applied: `palmIDs` maps the entry index
     /// of each new Palm record to the ID the Palm assigned, `macKeys` the
     /// entry index of each new Mac item to its key.
@@ -228,17 +236,26 @@ public enum SyncError: Error, Equatable {
 /// - Slow sync: Palm records unknown to the mirror are matched to Mac items
 ///   by content (`matches`) before either side gets a copy of the other's.
 public struct SyncEngine<Item: SyncedItem> {
-    /// One side's state of a mirrored item.
-    enum Side { case same, changed(Item), deleted, archived }
+    /// One side's state of a mirrored item. `missing`: not on the Palm in a
+    /// slow sync whose deletions are not trusted (see `palmDeletesTrusted`).
+    enum Side { case same, changed(Item), deleted, archived, missing }
 
     public var conflictPolicy: ConflictPolicy
+    /// Whether a mirrored record absent from the Palm means the user deleted
+    /// it there. False after a hard reset, a sync with another PC, or an
+    /// interrupted install (`lastSyncPC` is not ours): then, as HotSync
+    /// Manager's conduits did, nothing is deleted on the Mac and the record
+    /// is put back on the Palm.
+    public var palmDeletesTrusted: Bool
     /// Whether a mirrored item missing from the Mac's list is still the
     /// Mac's business (deleted there) or merely outside what the Mac was
     /// asked for (aged out). Always true for contacts and tasks.
     public var inWindow: @Sendable (Item) -> Bool
 
-    public init(conflictPolicy: ConflictPolicy = .macWins, inWindow: @escaping @Sendable (Item) -> Bool = { _ in true }) {
+    public init(conflictPolicy: ConflictPolicy = .macWins, palmDeletesTrusted: Bool = true,
+                inWindow: @escaping @Sendable (Item) -> Bool = { _ in true }) {
         self.conflictPolicy = conflictPolicy
+        self.palmDeletesTrusted = palmDeletesTrusted
         self.inWindow = inWindow
     }
 
@@ -304,7 +321,9 @@ public struct SyncEngine<Item: SyncedItem> {
                     palm = item == base ? .same : .changed(item)
                 }
             } else if !fast {
-                palm = .deleted    // a slow sync lists every record: gone means deleted
+                // a slow sync lists every record: gone means deleted, if the
+                // Palm's state is to be believed
+                palm = palmDeletesTrusted ? .deleted : .missing
             }
 
             // the Mac's state
@@ -323,6 +342,15 @@ public struct SyncEngine<Item: SyncedItem> {
                 if case .changed = palm { plan.palmDeletes.append(entry.palmID) }
                 plan.log.append("\(base.title ?? "?"): left the window, removed from the Palm")
                 continue
+            }
+
+            if case .missing = palm {
+                if case .same = mac {
+                    plan.log.append("\(base.title ?? "?"): missing on the Palm, put back (its deletions are not trusted)")
+                    writePalm(base, id: nil, over: entry.palmRecord, mac: entry.mac, macOwned: entry.macOwned)
+                    continue
+                }
+                palm = .deleted    // edited or deleted on the Mac: the usual rules
             }
 
             switch (palm, mac) {
@@ -390,6 +418,8 @@ public struct SyncEngine<Item: SyncedItem> {
 
             case (.deleted, .deleted), (.deleted, .archived), (.same, .archived), (.changed, .archived):
                 break    // gone on both sides, or the Mac side cannot be archived
+            case (.missing, _), (_, .missing):
+                break    // handled above; the Mac side is never "missing"
             }
         }
 

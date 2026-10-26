@@ -12,6 +12,9 @@ public struct TaskWriter {
         public var updated = 0
         public var deleted = 0
         public var failures: [String] = []
+        /// Entry indices of creates and updates that did not happen, so the
+        /// mirror keeps the old base for them and they are retried.
+        public var failedEntries: [Int] = []
     }
 
     public let store: EKEventStore
@@ -102,6 +105,7 @@ public struct TaskWriter {
         for change in plan.macCreates {
             guard let list = listForCategory(change.item.category) ?? store.defaultCalendarForNewReminders() else {
                 result.failures.append("\(change.item.title ?? "?"): no list for category \(change.item.category)")
+                result.failedEntries.append(change.entry)
                 continue
             }
             let r = EKReminder(eventStore: store)
@@ -112,12 +116,14 @@ public struct TaskWriter {
                 result.createdKeys[change.entry] = MacKey(seriesID: r.calendarItemIdentifier)
             } catch {
                 result.failures.append("\(change.item.title ?? "?"): \(error.localizedDescription)")
+                result.failedEntries.append(change.entry)
             }
         }
 
         for change in plan.macUpdates {
             guard let key = change.key, let r = find(key) else {
                 result.failures.append("\(change.item.title ?? "?"): not found on the Mac any more")
+                result.failedEntries.append(change.entry)
                 continue
             }
             fill(r, from: change.item)
@@ -127,6 +133,7 @@ public struct TaskWriter {
                 result.updated += 1
             } catch {
                 result.failures.append("\(change.item.title ?? "?"): \(error.localizedDescription)")
+                result.failedEntries.append(change.entry)
             }
         }
 

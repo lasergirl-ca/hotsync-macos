@@ -32,7 +32,12 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     var contactTwoWay: Bool?
     var taskTwoWay: Bool?
 
+    /// Viele Löschungen auf einmal beim nächsten Abgleich zulassen; wird
+    /// nach dem HotSync, der sie gebraucht hat, wieder ausgeschaltet.
+    var allowMassDelete: Bool?
+
     var isDryRun: Bool { dryRun ?? false }
+    var isMassDeleteAllowed: Bool { allowMassDelete ?? false }
     var isCalendarTwoWay: Bool { calendarTwoWay ?? false }
     var isContactTwoWay: Bool { contactTwoWay ?? false }
     var isTaskTwoWay: Bool { taskTwoWay ?? false }
