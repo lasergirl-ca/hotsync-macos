@@ -22,9 +22,16 @@ public struct PalmDate: Equatable, Hashable, Comparable, Codable, Sendable {
         day = Int(packed & 0x1F)
     }
 
+    /// The 16-bit form. A year outside 1904…2031 cannot be stored: it is
+    /// clamped to the window's edge (2031-12-31 or 1904-01-01), never to
+    /// 0xFFFF, which would mean "no date".
     public var packed: UInt16 {
-        UInt16(clamping: (year - 1904) << 9 | month << 5 | day)
+        if year > 2031 { return UInt16((2031 - 1904) << 9 | 12 << 5 | 31) }
+        if year < 1904 { return UInt16(1 << 5 | 1) }
+        return UInt16((year - 1904) << 9 | month << 5 | day)
     }
+    /// The last day a Palm record can hold.
+    public static let maxRepresentable = PalmDate(year: 2031, month: 12, day: 31)
 
     public static func < (a: PalmDate, b: PalmDate) -> Bool {
         (a.year, a.month, a.day) < (b.year, b.month, b.day)

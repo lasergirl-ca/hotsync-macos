@@ -1212,8 +1212,19 @@ final class AppState {
         // Das Fenster zeigt den Tab, der gerade synct
         selectedTabId = tabId
 
-        let mode = tabStore.tab(tabId)?.hotSyncMode ?? .syncInstallBackup
-        if mode.syncs, let profile = deviceManager.profile(profileId) {
+        let mode = tabStore.tab(tabId)?.hotSyncMode ?? .installBackup
+        let palmOS = PalmOSVersion(rom: session.romVersion)
+        if mode.syncs, let profile = deviceManager.profile(profileId), !palmOS.hasGarnetPIM {
+            // Datebook/Address/ToDo-Geräte: die P*-Datenbanken und locL* gibt es nicht
+            if profile.calendarSync?.enabled == true || profile.contactSync?.enabled == true || profile.taskSync?.enabled == true
+                || profile.isZoneSyncOn {
+                tabLog(tabId, L10n.logPalmOSTooOld(palmOS.description))
+            }
+            if profile.isClockSyncOn {
+                if profile.isDryRun { tabLog(tabId, L10n.logDryRunClock) } else { session.runner.send("settime") }
+            }
+        }
+        if mode.syncs, let profile = deviceManager.profile(profileId), palmOS.hasGarnetPIM {
             let dry = profile.isDryRun
             if dry { tabLog(tabId, L10n.logDryRun) }
             // Uhr vom Mac jetzt, Zeitzonen nach der Sicherung
@@ -1243,34 +1254,34 @@ final class AppState {
             // Erst sichern, dann ersetzen: ohne Sicherung dieses Palms gehen
             // sein eigener Kalender und seine Kontakte nicht verloren
             if let settings = profile.calendarSync, settings.enabled {
-                if profile.isCalendarTwoWay {
+                if profile.lastBackupAt == nil {
+                    tabLog(tabId, L10n.logCalendarNeedsBackup)   // ein- wie beidseitig: erst sichern
+                } else if profile.isCalendarTwoWay {
                     // nach der Sicherung: Palm lesen, zusammenführen, dann schreiben
                     session.twoWayDatabases.append(CalendarBuilder.databaseName)
                     tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayCalendar))
-                } else if profile.lastBackupAt == nil {
-                    tabLog(tabId, L10n.logCalendarNeedsBackup)
                 } else {
                     queueCalendar(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears)
                     if !dry { session.checkDatabases.append(CalendarBuilder.databaseName) }
                 }
             }
             if let settings = profile.contactSync, settings.enabled {
-                if profile.isContactTwoWay {
+                if profile.lastBackupAt == nil {
+                    tabLog(tabId, L10n.logContactsNeedBackup)
+                } else if profile.isContactTwoWay {
                     session.twoWayDatabases.append(ContactsBuilder.databaseName)
                     tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayContacts))
-                } else if profile.lastBackupAt == nil {
-                    tabLog(tabId, L10n.logContactsNeedBackup)
                 } else {
                     queueContacts(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears)
                     if !dry { session.checkDatabases.append(ContactsBuilder.databaseName) }
                 }
             }
             if let settings = profile.taskSync, settings.enabled {
-                if profile.isTaskTwoWay {
+                if profile.lastBackupAt == nil {
+                    tabLog(tabId, L10n.logTasksNeedBackup)
+                } else if profile.isTaskTwoWay {
                     session.twoWayDatabases.append(TasksBuilder.databaseName)
                     tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayTasks))
-                } else if profile.lastBackupAt == nil {
-                    tabLog(tabId, L10n.logTasksNeedBackup)
                 } else {
                     if !dry { session.checkDatabases.append(TasksBuilder.databaseName) }
                     // Reminders liefert asynchron; der Palm wartet solange (Lebenszeichen)
@@ -1388,9 +1399,11 @@ final class AppState {
         return dir.appendingPathComponent("\(name).pdb")
     }
 
-    /// Schreibt eine gebaute Datenbank; für einen Palm mit DateFix in dessen Jahren.
+    /// Schreibt eine gebaute Datenbank (die Erbauer rechnen DateFix' Jahre
+    /// schon beim Kodieren ein).
     private func writeDatabase(_ db: PalmDatabase, to url: URL, dateFixYears: Int) throws -> Int {
-        let image = DateFix.shift(db, years: -dateFixYears).encode()
+        _ = dateFixYears
+        let image = db.encode()
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try image.write(to: url, options: .atomic)
         return image.count
@@ -1400,7 +1413,7 @@ final class AppState {
                                dateFixYears: Int) {
         guard let profile = deviceManager.profile(profileId) else { return }
         do {
-            let run = try CalendarSyncRun(settings: settings, source: calendarSource)
+            let run = try CalendarSyncRun(settings: settings, source: calendarSource, dateShift: dateFixYears)
             let url = try syncTarget(CalendarBuilder.databaseName, for: profile, dryRun: dryRun)
             let bytes = try writeDatabase(run.database, to: url, dateFixYears: dateFixYears)
             if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(CalendarBuilder.databaseName, run.report.records, bytes)); return }
@@ -1559,21 +1572,10 @@ final class AppState {
         // installierte Datenbank) wird auf dem Mac nichts gelöscht.
         var engine = given
         engine.palmDeletesTrusted = fast
+        engine.dateShift = session.dateFixYears   // DateFix: Palm-Jahre ↔ echte Jahre, an den Werten
         if !fast, !mirror.entries.isEmpty { tabLog(tabId, L10n.logTwoWayDeletesUntrusted(what)) }
-        // es wird immer alles gelesen; mit DateFix in echten Jahren
-        let kind = DateFix.Kind(creator: session.twoWayCurrent == ContactsBuilder.databaseName ? "PAdd"
-                                : session.twoWayCurrent == TasksBuilder.databaseName ? "PTod" : "PDat")!
         let bases = Dictionary(mirror.entries.map { ($0.palmID, $0.base) }, uniquingKeysWith: { a, _ in a })
-        let palm = PalmSnapshot.all(session.calendarRecords.map { record in
-            var r = record
-            r.data = DateFix.shift(record.data, kind: kind, years: session.dateFixYears)
-            if session.dateFixYears > 0, let base = bases[record.id] {
-                // ein Datum vor DateFix' Fenster hat der Palm auf dessen ersten
-                // Tag gesetzt: das ist keine Änderung, der Spiegel behält es
-                r.data = DateFix.unclamp(r.data, kind: kind, startYear: 1904 + session.dateFixYears, base: base)
-            }
-            return r
-        })
+        let palm = PalmSnapshot.all(session.calendarRecords)   // es wird immer alles gelesen
         do {
             let plan = try engine.plan(palm: palm, palmCategories: palmCategories, mac: mac, mirror: mirror)
             tabLog(tabId, L10n.logTwoWaySummary(what, toPalm: plan.palmWrites.count, palmDeletes: plan.palmDeletes.count,
@@ -1696,7 +1698,13 @@ final class AppState {
             return
         }
         let builder = ContactsBuilder(options: .init(containers: settings.containers.map { .init(id: $0.id, title: $0.title) }))
-        let engine = SyncEngine<SyncedContact>(conflictPolicy: settings.conflicts)
+        var engine = SyncEngine<SyncedContact>(conflictPolicy: settings.conflicts)
+        if session.dateFixYears > 0 {
+            // ein Geburtstag vor DateFix' Fenster liegt auf dem Palm auf dessen
+            // erstem Tag: das ist keine Änderung, der Spiegel behält ihn
+            let startYear = 1904 + session.dateFixYears
+            engine.unclamp = { item, base in DateFix.unclamp(item, startYear: startYear, base: base) }
+        }
         let writer = ContactWriter(store: contactSource.store, containerIDs: containers)
         twoWayRun(session, profile: profile, what: L10n.twoWayContacts, mirrorFile: "contacts-mirror.json", engine: engine,
                   palmCategories: appInfo.categories.names, mac: builder.syncItems(macContacts),
@@ -1712,13 +1720,19 @@ final class AppState {
     }
 
     private func twoWayTasks(_ session: Session, profile: DeviceProfile) {
-        guard let tabId = session.tabId, let settings = profile.taskSync else { return }
+        // die Aufgaben schließen die Datenbank selbst (asynchron), auch bei jedem frühen Ende
+        guard let tabId = session.tabId, let settings = profile.taskSync else {
+            session.runner.send("closedb")
+            return
+        }
         guard reminderSource.hasAccess else {
             tabLog(tabId, L10n.logTasksNoAccess)
+            session.runner.send("closedb")
             return
         }
         guard let appInfoData = session.calendarAppInfo, let appInfo = try? TaskAppInfo(data: appInfoData) else {
             tabLog(tabId, L10n.logTwoWayFailed("TasksDB-PTod: AppInfo"))
+            session.runner.send("closedb")
             return
         }
         // Reminders liefert asynchron; der Palm wartet solange (Lebenszeichen)
@@ -1866,7 +1880,7 @@ final class AppState {
                             dateFixYears: Int) async {
         guard let profile = deviceManager.profile(profileId) else { return }
         do {
-            let run = try await TaskSyncRun(settings: settings, source: reminderSource)
+            let run = try await TaskSyncRun(settings: settings, source: reminderSource, dateShift: dateFixYears)
             let url = try syncTarget(TasksBuilder.databaseName, for: profile, dryRun: dryRun)
             let bytes = try writeDatabase(run.database, to: url, dateFixYears: dateFixYears)
             if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(TasksBuilder.databaseName, run.report.records, bytes)); return }
@@ -1885,7 +1899,7 @@ final class AppState {
                                dateFixYears: Int) {
         guard let profile = deviceManager.profile(profileId) else { return }
         do {
-            let run = try ContactSyncRun(settings: settings, source: contactSource)
+            let run = try ContactSyncRun(settings: settings, source: contactSource, dateShift: dateFixYears)
             let url = try syncTarget(ContactsBuilder.databaseName, for: profile, dryRun: dryRun)
             let bytes = try writeDatabase(run.database, to: url, dateFixYears: dateFixYears)
             if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(ContactsBuilder.databaseName, run.report.records, bytes)); return }

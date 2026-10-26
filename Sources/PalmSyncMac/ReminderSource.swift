@@ -149,7 +149,8 @@ public struct TaskSyncRun {
         case doesNotReadBack
     }
 
-    public init(settings: TaskSyncSettings, source: ReminderSource, homeZone: TimeZone = .current, now: Date = Date()) async throws {
+    public init(settings: TaskSyncSettings, source: ReminderSource, homeZone: TimeZone = .current, now: Date = Date(),
+                dateShift: Int = 0) async throws {
         guard source.hasAccess else { throw Failure.noAccess }
         let found = try await source.reminders(in: settings.lists.map(\.id), homeZone: homeZone)
         reminders = found.count
@@ -158,7 +159,8 @@ public struct TaskSyncRun {
         let today = PalmDate(now, in: calendar)
         let builder = TasksBuilder(options: .init(lists: settings.lists.map { .init(id: $0.id, title: $0.title) },
                                                   keepCompletedDays: settings.keepCompletedDays, today: today,
-                                                  startOfWeek: Foundation.Calendar.current.firstWeekday == 2 ? 1 : 0))
+                                                  startOfWeek: Foundation.Calendar.current.firstWeekday == 2 ? 1 : 0,
+                                                  dateShift: dateShift))
         (database, report) = builder.build(found)
 
         let image = database.encode()

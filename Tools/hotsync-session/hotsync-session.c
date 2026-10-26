@@ -887,8 +887,12 @@ static void close_database(int sd)
 {
 	if (!require_open_db("closedb"))
 		return;
-	if (dlp_CloseDB(sd, open_db) < 0)
+	/* entweder Fehler oder dbClosed, nie beides: die App geht bei jedem weiter */
+	if (dlp_CloseDB(sd, open_db) < 0) {
 		emit_dlp_error(sd, "closedb", "cannot close the database");
+		open_db = -1;
+		return;
+	}
 	open_db = -1;
 	emit_begin("dbClosed");
 	emit_end();

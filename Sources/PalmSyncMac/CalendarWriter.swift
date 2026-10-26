@@ -55,9 +55,12 @@ public struct CalendarWriter {
             if end < ek.startDate { end = ek.startDate }
             ek.endDate = end
         } else {
+            // EventKit keeps an all-day event on the device's local day, so
+            // the day is made in the device's calendar, not the Palm's zone
             ek.isAllDay = true
-            ek.startDate = date(event.date, nil, in: calendar)
-            ek.endDate = calendar.date(byAdding: DateComponents(day: 1, second: -1), to: ek.startDate)!
+            ek.timeZone = nil
+            ek.startDate = date(event.date, nil, in: Calendar.current)
+            ek.endDate = Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: ek.startDate)!
         }
 
         ek.alarms = nil

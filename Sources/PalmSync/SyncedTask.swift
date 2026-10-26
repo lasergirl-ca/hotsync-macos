@@ -126,6 +126,18 @@ extension SyncedTask: SyncedItem {
         }
     }
 
+    public func shiftingDates(by years: Int) -> SyncedTask {
+        guard years != 0 else { return self }
+        var s = self
+        s.dueDate = dueDate.map { DateFix.shift($0, years: years) }
+        s.completedDate = completedDate.map { DateFix.shift($0, years: years) }
+        if let r = repeatRule {
+            s.repeatRule = Repeat(start: DateFix.shift(r.start, years: years),
+                                  rule: { var x = r.rule; x.endDate = x.endDate.map { DateFix.shift($0, years: years) }; return x }())
+        }
+        return s
+    }
+
     /// Slow sync: the same title and due date.
     public func matches(_ other: SyncedTask) -> Bool {
         title == other.title && dueDate == other.dueDate

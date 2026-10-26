@@ -17,12 +17,13 @@ struct SyncTab: Codable, Identifiable, Equatable {
     /// Von vor der Betriebsart: true/nil "Installieren + Sichern", false
     /// "Nur installieren". Bleibt in tabs.json für ältere Versionen.
     var fullSync: Bool?
-    /// Was ein HotSync dieses Tabs tut; nil: wie `fullSync` sagt, und der
-    /// PIM-Abgleich läuft mit (er tut nichts, solange er im Profil aus ist)
+    /// Was ein HotSync dieses Tabs tut; nil: wie `fullSync` sagt - ein Tab
+    /// aus einer Version ohne PIM-Abgleich bleibt bei Installieren und
+    /// Sichern, der Abgleich kommt erst, wenn man ihn wählt
     var mode: HotSyncMode?
 
     var hotSyncMode: HotSyncMode {
-        get { mode ?? (fullSync == false ? .installOnly : .syncInstallBackup) }
+        get { mode ?? (fullSync == false ? .installOnly : .installBackup) }
         set {
             mode = newValue
             fullSync = newValue.backsUp

@@ -25,13 +25,28 @@ public struct MirrorEntry<Item: SyncedItem>: Equatable, Codable, Sendable {
     /// The Mac owns this item (an expanded occurrence of a rule the Palm
     /// cannot express): edits made on the Palm are logged and undone.
     public var macOwned: Bool
+    /// The Palm's private flag.
+    public var secret: Bool
 
-    public init(palmID: UInt32, mac: MacKey, base: Item, palmRecord: Data, macOwned: Bool = false) {
+    public init(palmID: UInt32, mac: MacKey, base: Item, palmRecord: Data, macOwned: Bool = false, secret: Bool = false) {
         self.palmID = palmID
         self.mac = mac
         self.base = base
         self.palmRecord = palmRecord
         self.macOwned = macOwned
+        self.secret = secret
+    }
+
+    enum CodingKeys: String, CodingKey { case palmID, mac, base, palmRecord, macOwned, secret }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        palmID = try c.decode(UInt32.self, forKey: .palmID)
+        mac = try c.decode(MacKey.self, forKey: .mac)
+        base = try c.decode(Item.self, forKey: .base)
+        palmRecord = try c.decode(Data.self, forKey: .palmRecord)
+        macOwned = try c.decodeIfPresent(Bool.self, forKey: .macOwned) ?? false
+        secret = try c.decodeIfPresent(Bool.self, forKey: .secret) ?? false   // mirrors from before the flag
     }
 }
 

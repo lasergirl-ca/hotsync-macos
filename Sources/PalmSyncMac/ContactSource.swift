@@ -167,11 +167,12 @@ public struct ContactSyncRun {
         case doesNotReadBack
     }
 
-    public init(settings: ContactSyncSettings, source: ContactSource) throws {
+    public init(settings: ContactSyncSettings, source: ContactSource, dateShift: Int = 0) throws {
         guard source.hasAccess else { throw Failure.noAccess }
         let macContacts = try source.contacts(in: settings.containers.map(\.id))
         contacts = macContacts.count
-        let builder = ContactsBuilder(options: .init(containers: settings.containers.map { .init(id: $0.id, title: $0.title) }))
+        let builder = ContactsBuilder(options: .init(containers: settings.containers.map { .init(id: $0.id, title: $0.title) },
+                                                     dateShift: dateShift))
         (database, report) = builder.build(macContacts)
 
         let image = database.encode()

@@ -41,18 +41,19 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     var isCalendarTwoWay: Bool { calendarTwoWay ?? false }
     var isContactTwoWay: Bool { contactTwoWay ?? false }
     var isTaskTwoWay: Bool { taskTwoWay ?? false }
-    /// Die Uhr des Palms bei jedem HotSync vom Mac stellen; nil = an
+    /// Die Uhr des Palms bei jedem HotSync vom Mac stellen; nil = aus
     var clockSync: Bool?
     /// Die Zeitzonen-Regeln der Orte des Palms aus der tzdata des Macs
-    /// nachführen; nil = an
+    /// nachführen; nil = aus (ein Palm, dessen Orte umgeschrieben werden,
+    /// braucht danach einen Soft-Reset)
     var zoneSync: Bool?
 
     /// Diesen Mac bei jedem Kabel-HotSync als primären PC für den
     /// Netzwerk-HotSync in den Palm schreiben; nil = aus
     var netSync: Bool?
 
-    var isClockSyncOn: Bool { clockSync ?? true }
-    var isZoneSyncOn: Bool { zoneSync ?? true }
+    var isClockSyncOn: Bool { clockSync ?? false }
+    var isZoneSyncOn: Bool { zoneSync ?? false }
     var isNetSyncOn: Bool { netSync ?? false }
 
     var palmOS: PalmOSVersion? { romVersion.map(PalmOSVersion.init(rom:)) }

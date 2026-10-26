@@ -107,8 +107,11 @@ public struct ContactsBuilder {
     public struct Options: Sendable {
         /// Accounts in priority order: the first wins a duplicate.
         public var containers: [MacContainer]
-        public init(containers: [MacContainer]) {
+        /// DateFix on the Palm: years taken away from the birthday on encoding.
+        public var dateShift: Int
+        public init(containers: [MacContainer], dateShift: Int = 0) {
             self.containers = containers
+            self.dateShift = dateShift
         }
     }
 
@@ -209,7 +212,7 @@ public struct ContactsBuilder {
         db.records = sorted.enumerated().map { i, contact in
             let record = convert(contact, &report)
             let category = contact.groups.first.flatMap { categoryOf[String($0.prefix(CategoryAppInfo.nameWidth - 1))] } ?? 0
-            return PalmDatabase.Record(category: category, uniqueID: UInt32(i + 1), data: record.encode())
+            return PalmDatabase.Record(category: category, uniqueID: UInt32(i + 1), data: DateFix.shift(record, years: -options.dateShift).encode())
         }
         db.uniqueIDSeed = UInt32(sorted.count + 1)
         report.records = sorted.count

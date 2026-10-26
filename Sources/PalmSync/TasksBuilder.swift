@@ -65,12 +65,15 @@ public struct TasksBuilder {
         public var keepCompletedDays: Int
         public var today: PalmDate
         public var startOfWeek: UInt8
+        /// DateFix on the Palm: years taken away from every date on encoding.
+        public var dateShift: Int
 
-        public init(lists: [MacList], keepCompletedDays: Int = 30, today: PalmDate, startOfWeek: UInt8 = 0) {
+        public init(lists: [MacList], keepCompletedDays: Int = 30, today: PalmDate, startOfWeek: UInt8 = 0, dateShift: Int = 0) {
             self.lists = lists
             self.keepCompletedDays = keepCompletedDays
             self.today = today
             self.startOfWeek = startOfWeek
+            self.dateShift = dateShift
         }
     }
 
@@ -147,7 +150,7 @@ public struct TasksBuilder {
         var db = PalmDatabase(name: Self.databaseName, type: "DATA", creator: "PTod", attributes: 0, version: 1,
                               appInfo: TaskAppInfo(categories: CategoryAppInfo(names: names)).encode())
         db.records = tasks.enumerated().map { i, t in
-            PalmDatabase.Record(category: t.1, uniqueID: UInt32(i + 1), data: t.0.encode())
+            PalmDatabase.Record(category: t.1, uniqueID: UInt32(i + 1), data: DateFix.shift(t.0, years: -options.dateShift).encode())
         }
         db.uniqueIDSeed = UInt32(tasks.count + 1)
         report.records = tasks.count

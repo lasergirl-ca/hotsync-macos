@@ -34,7 +34,8 @@ private let vancouver: Calendar = {
     let ek = EKEvent(eventStore: store)
     CalendarWriter.fill(ek, from: event, in: vancouver)
     #expect(ek.isAllDay)
-    #expect(vancouver.component(.day, from: ek.startDate) == 1 && vancouver.component(.day, from: ek.endDate) == 1)
+    // an all-day event lives on the Mac's local day, whatever zone the Mac is in
+    #expect(Calendar.current.component(.day, from: ek.startDate) == 1 && Calendar.current.component(.day, from: ek.endDate) == 1)
     #expect(ek.alarms == nil || ek.alarms?.isEmpty == true)
 }
 

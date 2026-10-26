@@ -360,3 +360,27 @@ private func syncedMirror() -> CalendarMirror {
     two.palmDeletes = [1, 2]
     #expect(two.massDeletion(mirrorEntries: 2) == nil)             // fewer than three never count
 }
+
+// MARK: - What the Palm keeps across a whole-database install
+
+@Test func privateFlagAndUndecodableRecordsSurvive() throws {
+    let secretRecord = PalmRecordIn(id: 0x1001, attributes: 0x10, category: 1,
+                                    data: palmRecord(id: 0x1001, "Dentist", PalmDate(year: 2026, month: 10, day: 22)).data)
+    let garbage = PalmRecordIn(id: 0x1002, attributes: 0x10, category: 1, data: Data([0xFF, 0xFF, 0xFF]))
+    let plan = try engine.plan(palm: .all([secretRecord, garbage]), palmCategories: palmCategories, mac: [], mirror: SyncMirror(pcID: 7))
+    #expect(plan.macCreates.count == 1)                       // the garbage never reaches the Mac
+    #expect(plan.opaque.map(\.id) == [0x1002])
+    let (db, _, _) = plan.palmDatabase(categories: CategoryAppInfo(names: palmCategories))
+    #expect(db.records.count == 2)
+    let dentist = try #require(db.records.first { $0.uniqueID == 0x1001 })
+    #expect(dentist.isSecret && dentist.category == 1)   // private, category 1
+    #expect(db.records.first { $0.uniqueID == 0x1002 }?.data == garbage.data)      // kept byte for byte
+    #expect(db.uniqueIDSeed > 0x1002)
+
+    // a known record whose bytes stopped decoding keeps its bytes and its base
+    let mirror = syncedMirror()
+    let broken = PalmRecordIn(id: 0x1001, attributes: 0x40, category: 1, data: Data([1, 2]))
+    let next = try engine.plan(palm: .modified([broken]), palmCategories: palmCategories,
+                               mac: items([macEvent("Standup", standupStart)]), mirror: mirror)
+    #expect(next.macUpdates.isEmpty && next.entries[0].palmRecord == broken.data && next.entries[0].item == mirror.entries[0].base)
+}

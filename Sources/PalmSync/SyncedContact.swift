@@ -224,6 +224,13 @@ extension SyncedContact: SyncedItem {
         }
     }
 
+    public func shiftingDates(by years: Int) -> SyncedContact {
+        guard years != 0, let birthday else { return self }
+        var s = self
+        s.birthday = DateFix.shift(birthday, years: years)
+        return s
+    }
+
     /// Slow sync: the same name and company, as the builder's duplicate
     /// rule has it.
     public func matches(_ other: SyncedContact) -> Bool {

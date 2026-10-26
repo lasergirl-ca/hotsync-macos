@@ -582,6 +582,14 @@ enum L10n {
         "Abgleich in beide Richtungen in dieser Sitzung ausgelassen: nach dem Zurückspielen beim nächsten HotSync",
         "Two-way sync skipped in this session: after a restore, at the next HotSync"
     ) }
+    static func logPalmOSTooOld(_ version: String) -> String { s(
+        "Palm OS \(version): Kalender, Kontakte, Aufgaben und Zeitzonen brauchen Palm OS 5.2 oder neuer – ausgelassen",
+        "Palm OS \(version): Calendar, Contacts, Tasks and time zones need Palm OS 5.2 or later – skipped"
+    ) }
+    static func palmOSTooOld(_ version: String) -> String { s(
+        "Dieser Palm hat Palm OS \(version). Der Abgleich von Kalender, Kontakten und Aufgaben und die Zeitzonen brauchen die Garnet-Programme ab Palm OS 5.2 (Tungsten T3 und neuer); Installieren, Sichern und Zurückspielen gehen wie immer.",
+        "This Palm runs Palm OS \(version). Syncing Calendar, Contacts and Tasks and the time zones need the Garnet applications of Palm OS 5.2 and later (Tungsten T3 onwards); install, backup and restore work as always."
+    ) }
     static var logDryRun: String { s("Probelauf: die Abgleiche schreiben nichts", "Dry run: the syncs write nothing") }
     static var logDryRunClock: String { s("Probelauf: die Uhr des Palms würde gestellt", "Dry run: the Palm's clock would be set") }
     static func logDryRunWouldInstall(_ name: String, _ records: Int, _ bytes: Int) -> String { s(

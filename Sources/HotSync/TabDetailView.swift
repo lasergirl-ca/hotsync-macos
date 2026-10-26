@@ -27,11 +27,22 @@ struct TabDetailView: View {
                             resultBox(status)
                         }
                     }
-                    DryRunSection(profileId: tab.profileId)
-                    CalendarSyncSection(profileId: tab.profileId)
-                    ContactSyncSection(profileId: tab.profileId)
-                    TaskSyncSection(profileId: tab.profileId)
-                    TimeSyncSection(profileId: tab.profileId)
+                    if palmOS?.hasGarnetPIM ?? true {
+                        DryRunSection(profileId: tab.profileId)
+                        CalendarSyncSection(profileId: tab.profileId)
+                        ContactSyncSection(profileId: tab.profileId)
+                        TaskSyncSection(profileId: tab.profileId)
+                        TimeSyncSection(profileId: tab.profileId)
+                    } else if let os = palmOS {
+                        // Datebook/Address/ToDo-Geräte: kein Abgleich, keine Zeitzonen, nur die Uhr
+                        GroupBox {
+                            Text(L10n.palmOSTooOld(os.description))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(4)
+                        }
+                    }
                     if let queue = appState.queue(for: tab) {
                         QueueSection(queue: queue, profileId: tab.profileId,
                                      isSyncing: appState.status(tab.id)?.isSyncing == true)
@@ -790,7 +801,7 @@ struct TimeSyncSection: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 6) {
                 Toggle(isOn: Binding(
-                    get: { appState.deviceManager.profile(profileId)?.isClockSyncOn ?? true },
+                    get: { appState.deviceManager.profile(profileId)?.isClockSyncOn ?? false },
                     set: { appState.setClockSync($0, for: profileId) }
                 )) {
                     Text(L10n.clockSyncToggle)
@@ -799,7 +810,7 @@ struct TimeSyncSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Toggle(isOn: Binding(
-                    get: { appState.deviceManager.profile(profileId)?.isZoneSyncOn ?? true },
+                    get: { appState.deviceManager.profile(profileId)?.isZoneSyncOn ?? false },
                     set: { appState.setZoneSync($0, for: profileId) }
                 )) {
                     Text(L10n.zoneSyncToggle)

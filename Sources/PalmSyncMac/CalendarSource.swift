@@ -186,7 +186,8 @@ public struct CalendarSyncRun {
         case doesNotReadBack
     }
 
-    public init(settings: CalendarSyncSettings, source: CalendarSource, homeZone: TimeZone = .current, now: Date = Date()) throws {
+    public init(settings: CalendarSyncSettings, source: CalendarSource, homeZone: TimeZone = .current, now: Date = Date(),
+                dateShift: Int = 0) throws {
         guard source.hasAccess else { throw Failure.noAccess }
         let calendar = Foundation.Calendar.current
         let today = calendar.startOfDay(for: now)
@@ -196,7 +197,7 @@ public struct CalendarSyncRun {
         occurrences = events.count
         let builder = CalendarBuilder(options: .init(
             homeZone: homeZone, windowStart: windowStart, windowEnd: windowEnd, calendars: settings.macCalendars,
-            startOfWeek: calendar.firstWeekday == 2 ? 1 : 0))
+            startOfWeek: calendar.firstWeekday == 2 ? 1 : 0, dateShift: dateShift))
         (database, report) = builder.build(events)
 
         // what was built must read back as it was meant, before it goes near a Palm

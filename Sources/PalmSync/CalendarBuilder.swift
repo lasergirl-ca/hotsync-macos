@@ -26,14 +26,17 @@ public struct CalendarBuilder {
         public var calendars: [MacCalendar]
         /// 0 = Sunday, 1 = Monday, for the AppInfo and weekly rules without one.
         public var startOfWeek: UInt8
+        /// DateFix on the Palm: years taken away from every date on encoding.
+        public var dateShift: Int = 0
 
         public init(homeZone: TimeZone = .current, windowStart: Date, windowEnd: Date,
-                    calendars: [MacCalendar], startOfWeek: UInt8 = 0) {
+                    calendars: [MacCalendar], startOfWeek: UInt8 = 0, dateShift: Int = 0) {
             self.homeZone = homeZone
             self.windowStart = windowStart
             self.windowEnd = windowEnd
             self.calendars = calendars
             self.startOfWeek = startOfWeek
+            self.dateShift = dateShift
         }
     }
 
@@ -129,7 +132,7 @@ public struct CalendarBuilder {
                               appInfo: CalendarAppInfo(categories: categories, startOfWeek: options.startOfWeek).encode())
         db.records = items.enumerated().map { i, item in
             PalmDatabase.Record(category: names.firstIndex(of: item.category) ?? 0, uniqueID: UInt32(i + 1),
-                                data: item.event.encode())
+                                data: DateFix.shift(item.event, years: -options.dateShift).encode())
         }
         db.uniqueIDSeed = UInt32(items.count + 1)
         report.records = items.count

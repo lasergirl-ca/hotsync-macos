@@ -11,6 +11,15 @@ extension SyncedEvent: SyncedItem {
     public func matches(_ other: SyncedEvent) -> Bool {
         date == other.date && time == other.time && title == other.title
     }
+
+    public func shiftingDates(by years: Int) -> SyncedEvent {
+        guard years != 0 else { return self }
+        var s = self
+        s.date = DateFix.shift(date, years: years)
+        if let end = s.repeatRule?.endDate { s.repeatRule?.endDate = DateFix.shift(end, years: years) }
+        s.exceptions = exceptions.map { DateFix.shift($0, years: years) }
+        return s
+    }
 }
 
 public typealias CalendarSyncPlan = SyncPlan<SyncedEvent>

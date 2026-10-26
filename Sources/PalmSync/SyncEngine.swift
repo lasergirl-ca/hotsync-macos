@@ -30,6 +30,8 @@ public protocol SyncedItem: Equatable, Hashable, Codable, Sendable {
     func describe(_ field: Field) -> String
     /// Slow sync: is this the same item as `other`, met without a mirror?
     func matches(_ other: Self) -> Bool
+    /// Every date moved by `years` (DateFix, see `SyncEngine.dateShift`).
+    func shiftingDates(by years: Int) -> Self
 }
 
 extension SyncedItem {
@@ -134,6 +136,8 @@ public struct SyncPlan<Item: SyncedItem>: Equatable, Sendable {
         public var item: Item
         public var palmRecord: Data
         public var macOwned: Bool
+        /// The Palm's private flag, kept across the sync.
+        public var secret: Bool = false
     }
 
     public var palmWrites: [PalmWrite] = []
@@ -146,6 +150,9 @@ public struct SyncPlan<Item: SyncedItem>: Equatable, Sendable {
     public var entries: [Entry] = []
     /// Category names the Mac uses that the Palm's AppInfo lacks.
     public var missingCategories: [String] = []
+    /// Records the codec cannot read: they go back onto the Palm as they
+    /// are and never reach the Mac or the mirror.
+    public var opaque: [PalmRecordIn] = []
 
     public init() {}
 
@@ -169,7 +176,7 @@ public struct SyncPlan<Item: SyncedItem>: Equatable, Sendable {
         mirror.lastSync = date
         mirror.entries = entries.enumerated().compactMap { i, e in
             guard let palmID = e.palmID ?? palmIDs[i], let mac = e.mac ?? macKeys[i] else { return nil }
-            return MirrorEntry(palmID: palmID, mac: mac, base: e.item, palmRecord: e.palmRecord, macOwned: e.macOwned)
+            return MirrorEntry(palmID: palmID, mac: mac, base: e.item, palmRecord: e.palmRecord, macOwned: e.macOwned, secret: e.secret)
         }
         return mirror
     }
@@ -207,10 +214,15 @@ public struct SyncPlan<Item: SyncedItem>: Equatable, Sendable {
                 nextID += 1
                 palmIDs[i] = id
             }
-            records.append((entry.item, PalmDatabase.Record(category: index(of: entry.item.category), uniqueID: id, data: entry.palmRecord)))
+            records.append((entry.item, PalmDatabase.Record(attributes: entry.secret ? PalmDatabase.Record.secret : 0,
+                                                             category: index(of: entry.item.category), uniqueID: id, data: entry.palmRecord)))
         }
         records.sort { order($0.item, $1.item) }
-        return (records.map(\.record), palmIDs, categories, nextID)
+        // what could not be read keeps its place, flags and bytes
+        let kept = opaque.map {
+            PalmDatabase.Record(attributes: $0.attributes & PalmDatabase.Record.secret, category: $0.category, uniqueID: $0.id, data: $0.data)
+        }
+        return (records.map(\.record) + kept, palmIDs, categories, max(nextID, (opaque.map(\.id).max() ?? 0) + 1))
     }
 }
 
@@ -247,6 +259,13 @@ public struct SyncEngine<Item: SyncedItem> {
     /// Manager's conduits did, nothing is deleted on the Mac and the record
     /// is put back on the Palm.
     public var palmDeletesTrusted: Bool
+    /// DateFix: years to add to every date read from the Palm and to take
+    /// away from every date written to it. Record bytes stay in the Palm's
+    /// years; only items carry real ones.
+    public var dateShift = 0
+    /// After reading a mirrored item from the Palm: a chance to undo what
+    /// the Palm could not store (DateFix's clamp), given the mirror's base.
+    public var unclamp: (@Sendable (Item, Item) -> Item)?
     /// Whether a mirrored item missing from the Mac's list is still the
     /// Mac's business (deleted there) or merely outside what the Mac was
     /// asked for (aged out). Always true for contacts and tasks.
@@ -272,15 +291,16 @@ public struct SyncEngine<Item: SyncedItem> {
         }
         func palmItem(_ record: PalmRecordIn) -> Item? {
             guard let decoded = try? Item.palmRecord(from: record.data) else {
+                // kept as it is on the Palm (see `opaque`), never shown to the Mac
                 plan.log.append("Palm record \(record.id): cannot be decoded, left alone")
                 return nil
             }
             let name = record.category < palmCategories.count ? palmCategories[record.category] : "Unfiled"
-            return Item(decoded, category: name)
+            return Item(decoded, category: name).shiftingDates(by: dateShift)
         }
-        func writePalm(_ item: Item, id: UInt32?, over existing: Data?, mac: MacKey?, macOwned: Bool) {
-            let bytes = item.palmBytes(over: existing)
-            plan.entries.append(.init(palmID: id, mac: mac, item: item, palmRecord: bytes, macOwned: macOwned))
+        func writePalm(_ item: Item, id: UInt32?, over existing: Data?, mac: MacKey?, macOwned: Bool, secret: Bool = false) {
+            let bytes = item.shiftingDates(by: -dateShift).palmBytes(over: existing)
+            plan.entries.append(.init(palmID: id, mac: mac, item: item, palmRecord: bytes, macOwned: macOwned, secret: secret))
             plan.palmWrites.append(.init(id: id, category: palmCategory(item.category), record: bytes, entry: plan.entries.count - 1))
         }
 
@@ -313,12 +333,21 @@ public struct SyncEngine<Item: SyncedItem> {
             // the Palm's state
             var palm: Side = .same
             var palmBytes = entry.palmRecord
+            var secret = entry.secret
             if let current {
+                secret = current.attributes & PalmDatabase.Record.secret != 0
                 if current.isArchived { palm = .archived }
                 else if current.isDeleted { palm = .deleted }
-                else if let item = palmItem(current) {
+                else if var item = palmItem(current) {
+                    if let unclamp { item = unclamp(item, base) }
                     palmBytes = current.data
                     palm = item == base ? .same : .changed(item)
+                } else {
+                    // the Palm's bytes no longer decode: keep them as they
+                    // are, tell the Mac nothing, keep the mirror's base
+                    plan.entries.append(.init(palmID: entry.palmID, mac: entry.mac, item: base, palmRecord: current.data,
+                                              macOwned: entry.macOwned, secret: secret))
+                    continue
                 }
             } else if !fast {
                 // a slow sync lists every record: gone means deleted, if the
@@ -347,7 +376,7 @@ public struct SyncEngine<Item: SyncedItem> {
             if case .missing = palm {
                 if case .same = mac {
                     plan.log.append("\(base.title ?? "?"): missing on the Palm, put back (its deletions are not trusted)")
-                    writePalm(base, id: nil, over: entry.palmRecord, mac: entry.mac, macOwned: entry.macOwned)
+                    writePalm(base, id: nil, over: entry.palmRecord, mac: entry.mac, macOwned: entry.macOwned, secret: secret)
                     continue
                 }
                 palm = .deleted    // edited or deleted on the Mac: the usual rules
@@ -355,7 +384,7 @@ public struct SyncEngine<Item: SyncedItem> {
 
             switch (palm, mac) {
             case (.same, .same):
-                plan.entries.append(.init(palmID: entry.palmID, mac: entry.mac, item: base, palmRecord: palmBytes, macOwned: entry.macOwned))
+                plan.entries.append(.init(palmID: entry.palmID, mac: entry.mac, item: base, palmRecord: palmBytes, macOwned: entry.macOwned, secret: secret))
 
             case (.archived, _):
                 plan.log.append("\(base.title ?? "?"): archived on the Palm, kept on the Mac")
@@ -366,7 +395,7 @@ public struct SyncEngine<Item: SyncedItem> {
 
             case (.deleted, .changed(let item)):
                 plan.log.append("\(item.title ?? "?"): deleted on the Palm but edited on the Mac, put back on the Palm")
-                writePalm(item, id: nil, over: entry.palmRecord, mac: entry.mac, macOwned: entry.macOwned)
+                writePalm(item, id: nil, over: entry.palmRecord, mac: entry.mac, macOwned: entry.macOwned, secret: secret)
 
             case (.same, .deleted):
                 plan.palmDeletes.append(entry.palmID)
@@ -376,26 +405,26 @@ public struct SyncEngine<Item: SyncedItem> {
                     plan.palmDeletes.append(entry.palmID)
                 } else {
                     plan.log.append("\(item.title ?? "?"): deleted on the Mac but edited on the Palm, put back on the Mac")
-                    plan.entries.append(.init(palmID: entry.palmID, mac: nil, item: item, palmRecord: palmBytes, macOwned: false))
+                    plan.entries.append(.init(palmID: entry.palmID, mac: nil, item: item, palmRecord: palmBytes, macOwned: false, secret: secret))
                     plan.macCreates.append(.init(key: nil, item: item, entry: plan.entries.count - 1))
                 }
 
             case (.changed(let item), .same):
                 if entry.macOwned {
                     plan.log.append("\(base.title ?? "?"): edited on the Palm, but the Mac owns it; the edit is undone")
-                    writePalm(base, id: entry.palmID, over: palmBytes, mac: entry.mac, macOwned: true)
+                    writePalm(base, id: entry.palmID, over: palmBytes, mac: entry.mac, macOwned: true, secret: secret)
                 } else {
-                    plan.entries.append(.init(palmID: entry.palmID, mac: entry.mac, item: item, palmRecord: palmBytes, macOwned: false))
+                    plan.entries.append(.init(palmID: entry.palmID, mac: entry.mac, item: item, palmRecord: palmBytes, macOwned: false, secret: secret))
                     plan.macUpdates.append(.init(key: entry.mac, item: item, entry: plan.entries.count - 1))
                 }
 
             case (.same, .changed(let item)):
-                writePalm(item, id: entry.palmID, over: palmBytes, mac: entry.mac, macOwned: entry.macOwned)
+                writePalm(item, id: entry.palmID, over: palmBytes, mac: entry.mac, macOwned: entry.macOwned, secret: secret)
 
             case (.changed(let palmVersion), .changed(let macVersion)):
                 if entry.macOwned {
                     plan.log.append("\(base.title ?? "?"): edited on the Palm, but the Mac owns it; the edit is undone")
-                    writePalm(macVersion, id: entry.palmID, over: palmBytes, mac: entry.mac, macOwned: true)
+                    writePalm(macVersion, id: entry.palmID, over: palmBytes, mac: entry.mac, macOwned: true, secret: secret)
                     break
                 }
                 let before = plan.conflicts.count
@@ -404,13 +433,13 @@ public struct SyncEngine<Item: SyncedItem> {
                 if conflictPolicy == .keepBoth && plan.conflicts.count > before {
                     // the Palm's version lives on as a second item on both sides
                     plan.log.append("\(palmVersion.title ?? "?"): conflict, the Palm's version is kept as a second item")
-                    writePalm(palmVersion, id: nil, over: palmBytes, mac: nil, macOwned: false)
+                    writePalm(palmVersion, id: nil, over: palmBytes, mac: nil, macOwned: false, secret: secret)
                     plan.macCreates.append(.init(key: nil, item: palmVersion, entry: plan.entries.count - 1))
                 }
                 if merged != palmVersion {
-                    writePalm(merged, id: entry.palmID, over: palmBytes, mac: entry.mac, macOwned: false)
+                    writePalm(merged, id: entry.palmID, over: palmBytes, mac: entry.mac, macOwned: false, secret: secret)
                 } else {
-                    plan.entries.append(.init(palmID: entry.palmID, mac: entry.mac, item: merged, palmRecord: palmBytes, macOwned: false))
+                    plan.entries.append(.init(palmID: entry.palmID, mac: entry.mac, item: merged, palmRecord: palmBytes, macOwned: false, secret: secret))
                 }
                 if merged != macVersion {
                     plan.macUpdates.append(.init(key: entry.mac, item: merged, entry: plan.entries.count - 1))
@@ -439,14 +468,16 @@ public struct SyncEngine<Item: SyncedItem> {
                 }) {
                     let record = newPalm.remove(at: i)
                     let palmVersion = palmItem(record)!
+                    let secret = record.attributes & PalmDatabase.Record.secret != 0
                     // no common ancestor: the Palm's version stands in for it,
                     // so every difference is a Mac change
                     let merged = Self.merge(base: palmVersion, palm: palmVersion, mac: candidate, palmID: record.id, mac: macItem.key,
                                             policy: conflictPolicy, conflicts: &plan.conflicts)
                     if merged != palmVersion {
-                        writePalm(merged, id: record.id, over: record.data, mac: macItem.key, macOwned: macItem.macOwned)
+                        writePalm(merged, id: record.id, over: record.data, mac: macItem.key, macOwned: macItem.macOwned, secret: secret)
                     } else {
-                        plan.entries.append(.init(palmID: record.id, mac: macItem.key, item: merged, palmRecord: record.data, macOwned: macItem.macOwned))
+                        plan.entries.append(.init(palmID: record.id, mac: macItem.key, item: merged, palmRecord: record.data,
+                                                  macOwned: macItem.macOwned, secret: secret))
                     }
                     plan.log.append("\(candidate.title ?? "?"): found on both sides, paired")
                 } else {
@@ -457,8 +488,12 @@ public struct SyncEngine<Item: SyncedItem> {
         }
 
         for record in newPalm {
-            guard let item = palmItem(record) else { continue }
-            plan.entries.append(.init(palmID: record.id, mac: nil, item: item, palmRecord: record.data, macOwned: false))
+            guard let item = palmItem(record) else {
+                plan.opaque.append(record)    // stays on the Palm untouched
+                continue
+            }
+            plan.entries.append(.init(palmID: record.id, mac: nil, item: item, palmRecord: record.data, macOwned: false,
+                                      secret: record.attributes & PalmDatabase.Record.secret != 0))
             plan.macCreates.append(.init(key: nil, item: item, entry: plan.entries.count - 1))
         }
         for macItem in newMac {
