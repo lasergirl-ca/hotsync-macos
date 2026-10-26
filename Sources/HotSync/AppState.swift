@@ -661,6 +661,8 @@ final class AppState {
         /// nach dem Installieren: die Mac-Seite schreiben und den Spiegel
         /// speichern (liefert die Zahl seiner Einträge)
         var twoWayAfterInstall: (() throws -> Int)?
+        /// der Palm blieb, wie er war: nach dem Schließen nur lastSyncPC setzen
+        var twoWaySyncInfoOnly = false
         var twoWayPCID: UInt32 = 0
         /// wie viele Datensätze der Palm beim Öffnen gemeldet hat: weniger
         /// gelesen heißt abgebrochen, nicht gelöscht
@@ -838,6 +840,9 @@ final class AppState {
             if let url = session.twoWayInstall {
                 session.twoWayInstall = nil
                 session.runner.send("install \(url.path)")
+            } else if session.twoWaySyncInfoOnly {
+                session.twoWaySyncInfoOnly = false
+                session.runner.send("syncinfo \(session.twoWayPCID)")
             } else {
                 twoWayNext(session)
             }
@@ -1576,6 +1581,7 @@ final class AppState {
         session.calendarRecords = []
         session.twoWayInstall = nil
         session.twoWayAfterInstall = nil
+        session.twoWaySyncInfoOnly = false
         session.twoWayExpected = -1
         session.stage = .twoWayCalendar
         statuses[tabId]?.phase = .readingCalendar(user: user, database: name, done: 0)
@@ -1702,11 +1708,10 @@ final class AppState {
             // installiert), dann der Mac, dann der Spiegel: schlägt die
             // Installation fehl, ist auf dem Mac nichts passiert.
             let (db, palmIDs) = palmDatabase(plan)
-            let dbURL = mirrorURL("\(db.name).pdb", for: profile)
-            _ = try writeDatabase(db, to: dbURL)
-            session.twoWayInstall = dbURL
+            let palmUnchanged = plan.palmWrites.isEmpty && plan.palmDeletes.isEmpty && plan.agedOut.isEmpty
+                && plan.missingCategories.isEmpty && mirror.lastSync != nil
             session.twoWayPCID = mirror.pcID
-            session.twoWayAfterInstall = { [weak self] in
+            let finish: () throws -> Int = { [weak self] in
                 let result = applyMac(plan)
                 self?.tabLog(tabId, L10n.logTwoWayMacApplied(result.createdKeys.count, result.updated, result.deleted))
                 for failure in result.failures.prefix(10) { self?.tabLog(tabId, L10n.logTwoWayMacFailure(failure)) }
@@ -1720,6 +1725,23 @@ final class AppState {
                 try after.save(to: url)
                 return after.entries.count
             }
+            if palmUnchanged {
+                // nichts für den Palm: nicht installieren, nur die Mac-Seite und
+                // der Spiegel, und nach dem Schließen lastSyncPC
+                tabLog(tabId, L10n.logTwoWayPalmUnchanged(what))
+                do {
+                    let entries = try finish()
+                    tabLog(tabId, L10n.logTwoWayMirrorSaved(entries))
+                    session.twoWaySyncInfoOnly = true
+                } catch {
+                    tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
+                }
+                return
+            }
+            let dbURL = mirrorURL("\(db.name).pdb", for: profile)
+            _ = try writeDatabase(db, to: dbURL)
+            session.twoWayInstall = dbURL
+            session.twoWayAfterInstall = finish
             tabLog(tabId, L10n.logTwoWayPalmInstalling(what, db.records.count))
         } catch {
             tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))

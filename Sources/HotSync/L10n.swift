@@ -682,6 +682,9 @@ enum L10n {
     static func logTwoWayPalmInstalling(_ what: String, _ records: Int) -> String { s(
         "Palm: \(what) zusammengeführt, \(records) Einträge werden installiert …", "Palm: installing the merged \(what) (\(records) records) …"
     ) }
+    static func logTwoWayPalmUnchanged(_ what: String) -> String { s(
+        "Palm: \(what) unverändert, nichts wird installiert", "Palm: \(what) unchanged, nothing is installed"
+    ) }
     static func logTwoWayMirrorSaved(_ entries: Int) -> String { s(
         "Spiegel gespeichert: \(entries) Einträge", "Mirror saved: \(entries) entries"
     ) }
