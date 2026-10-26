@@ -688,6 +688,8 @@ final class AppState {
         /// Netz: eine verbundene Sitzung, von der nichts mehr kommt, wird
         /// beendet - libpisocks TCP-Seite kennt kein Lese-Timeout
         var watchdog: DispatchWorkItem?
+        /// "Viele Löschungen zulassen" wurde gebraucht: nach der Sitzung wieder aus
+        var usedMassDelete = false
         var stopRequested = false
 
         init(runner: SessionRunner, purpose: Purpose, token: Int) {
@@ -746,8 +748,23 @@ final class AppState {
     /// Nach dieser Zeit ohne Ereignis gilt eine Netzwerksitzung als hängend.
     private static let networkIdleLimit: TimeInterval = 180
 
+    /// So meldet das Werkzeug einen Palm, der nicht mehr da ist (über WLAN
+    /// merkt es der Socket erst spät): egal in welcher Phase, danach nichts
+    /// Weiteres versuchen.
+    private static func isLostLink(_ message: String) -> Bool {
+        message.contains("connection lost") || message.contains("does not answer")
+    }
+
     private func handle(_ event: SessionEvent, of session: Session) {
         let port = session.runner.port
+        if case .error(let stage, let message) = event, Self.isLostLink(message) {
+            session.errorMessage = "\(stage): \(message)"
+            DebugLog.shared.log(L10n.logSessionError(portLabel(port), stage, message), source: "Session")
+            if let tabId = session.tabId { tabLog(tabId, L10n.logSessionError(portLabel(port), stage, message)) }
+            session.palmLost = true
+            if stage != "backup" { endLostSession(session) }   // die Sicherung meldet gleich ihr Ende
+            return
+        }
         if SyncTab.isNetworkPort(port), session.connected || { if case .connected = event { return true } else { return false } }() {
             session.watchdog?.cancel()
             let work = DispatchWorkItem { [weak self, weak session] in
@@ -1012,12 +1029,6 @@ final class AppState {
             session.errorMessage = "\(stage): \(message)"
             DebugLog.shared.log(L10n.logSessionError(portLabel(port), stage, message), source: "Session")
             if let tabId = session.tabId { tabLog(tabId, L10n.logSessionError(portLabel(port), stage, message)) }
-            // das Werkzeug meldet so einen Palm, der nicht mehr da ist (über
-            // WLAN merkt es der Socket erst spät): nichts Weiteres versuchen
-            if message.contains("connection lost") || message.contains("does not answer") {
-                session.palmLost = true
-                if stage != "backup" { endLostSession(session) }   // die Sicherung meldet gleich ihr Ende
-            }
 
         case .dbOpened, .dbClosed, .appInfo, .appInfoWritten, .record, .recordsDone,
              .recordWritten, .recordDeleted, .flagsReset, .cleanedUp, .syncInfoWritten:
@@ -1444,8 +1455,7 @@ final class AppState {
 
     /// Schreibt eine gebaute Datenbank (die Erbauer rechnen DateFix' Jahre
     /// schon beim Kodieren ein).
-    private func writeDatabase(_ db: PalmDatabase, to url: URL, dateFixYears: Int) throws -> Int {
-        _ = dateFixYears
+    private func writeDatabase(_ db: PalmDatabase, to url: URL) throws -> Int {
         let image = db.encode()
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try image.write(to: url, options: .atomic)
@@ -1458,7 +1468,7 @@ final class AppState {
         do {
             let run = try CalendarSyncRun(settings: settings, source: calendarSource, dateShift: dateFixYears)
             let url = try syncTarget(CalendarBuilder.databaseName, for: profile, dryRun: dryRun)
-            let bytes = try writeDatabase(run.database, to: url, dateFixYears: dateFixYears)
+            let bytes = try writeDatabase(run.database, to: url)
             if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(CalendarBuilder.databaseName, run.report.records, bytes)); return }
             queue.refresh()
             tabLog(tabId, L10n.logCalendarQueued(run.report.records, run.report.seriesMapped, bytes))
@@ -1658,7 +1668,7 @@ final class AppState {
         let palm = PalmSnapshot.all(session.calendarRecords)   // es wird immer alles gelesen
         do {
             let plan = try engine.plan(palm: palm, palmCategories: palmCategories, mac: mac, mirror: mirror)
-            tabLog(tabId, L10n.logTwoWaySummary(what, toPalm: plan.palmWrites.count, palmDeletes: plan.palmDeletes.count,
+            tabLog(tabId, L10n.logTwoWaySummary(what, toPalm: plan.palmWrites.count, palmDeletes: plan.palmDeletes.count + plan.agedOut.count,
                                                 toMac: plan.macCreates.count + plan.macUpdates.count, macDeletes: plan.macDeletes.count,
                                                 conflicts: plan.conflicts.count, policy: engine.conflictPolicy))
             var lines: [String] = []
@@ -1685,7 +1695,7 @@ final class AppState {
                     return
                 }
                 tabLog(tabId, L10n.logTwoWayMassAllowed(what, mac: mass.mac, palm: mass.palm))
-                setAllowMassDelete(false, for: profile.id)   // gilt für diesen einen HotSync
+                session.usedMassDelete = true   // gilt für diesen einen HotSync, alle Datenbanken
             }
 
             // Erst der Palm (die zusammengeführte Datenbank, nach dem Schließen
@@ -1693,7 +1703,7 @@ final class AppState {
             // Installation fehl, ist auf dem Mac nichts passiert.
             let (db, palmIDs) = palmDatabase(plan)
             let dbURL = mirrorURL("\(db.name).pdb", for: profile)
-            _ = try writeDatabase(db, to: dbURL, dateFixYears: session.dateFixYears)
+            _ = try writeDatabase(db, to: dbURL)
             session.twoWayInstall = dbURL
             session.twoWayPCID = mirror.pcID
             session.twoWayAfterInstall = { [weak self] in
@@ -1971,7 +1981,7 @@ final class AppState {
         do {
             let run = try await TaskSyncRun(settings: settings, source: reminderSource, dateShift: dateFixYears)
             let url = try syncTarget(TasksBuilder.databaseName, for: profile, dryRun: dryRun)
-            let bytes = try writeDatabase(run.database, to: url, dateFixYears: dateFixYears)
+            let bytes = try writeDatabase(run.database, to: url)
             if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(TasksBuilder.databaseName, run.report.records, bytes)); return }
             queue.refresh()
             tabLog(tabId, L10n.logTasksQueued(run.report.records, run.report.completedSkipped, bytes))
@@ -1990,7 +2000,7 @@ final class AppState {
         do {
             let run = try ContactSyncRun(settings: settings, source: contactSource, dateShift: dateFixYears)
             let url = try syncTarget(ContactsBuilder.databaseName, for: profile, dryRun: dryRun)
-            let bytes = try writeDatabase(run.database, to: url, dateFixYears: dateFixYears)
+            let bytes = try writeDatabase(run.database, to: url)
             if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(ContactsBuilder.databaseName, run.report.records, bytes)); return }
             queue.refresh()
             tabLog(tabId, L10n.logContactsQueued(run.report.records, run.report.categories.count - 1, bytes))
@@ -2057,6 +2067,7 @@ final class AppState {
     private func finish(_ session: Session, exit: SessionRunner.Exit) {
         session.watchdog?.cancel()
         session.watchdog = nil
+        if session.usedMassDelete, let profileId = session.profileId { setAllowMassDelete(false, for: profileId) }
         let port = session.runner.port
         if sessions[port] === session {
             sessions[port] = nil

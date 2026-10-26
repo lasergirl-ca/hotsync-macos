@@ -130,7 +130,7 @@ private let tasksBuilder = TasksBuilder(options: .init(lists: [.init(id: "l1", t
     let larry = try #require(aged.entries.firstIndex { $0.mac.seriesID == "r-larry" })
     aged.entries[larry].base = doneLongAgo
     let next = try engine.plan(palm: .modified([]), palmCategories: ["Unfiled", "Family"], mac: tasksBuilder.syncItems([milk]), mirror: aged)
-    #expect(next.palmDeletes == [0x4001] && next.macDeletes.isEmpty && next.palmWrites.isEmpty)
+    #expect(next.agedOut == [0x4001] && next.palmDeletes.isEmpty && next.macDeletes.isEmpty && next.palmWrites.isEmpty)
     #expect(next.log.contains { $0.contains("left the window") })
 
     let (db, _, _) = plan.palmDatabase(appInfo: TaskAppInfo(categories: CategoryAppInfo(names: ["Unfiled", "Family"])))

@@ -203,8 +203,12 @@ public struct ContactWriter {
         for key in plan.macDeletes {
             // only the cards in the chosen accounts: a unified contact may be
             // linked to cards in accounts the sync does not cover
-            let cards = ownCards(of: key)
-            guard !cards.isEmpty else { continue }   // already gone, or not ours: fine
+            guard let unified = find(key) else { continue }   // already gone: fine
+            let cards = ownCards(of: unified)
+            guard !cards.isEmpty else {
+                result.failures.append("\(unified.givenName) \(unified.familyName): no card in the chosen accounts, nothing deleted")
+                continue
+            }
             let request = CNSaveRequest()
             for card in cards { request.delete(card.mutableCopy() as! CNMutableContact) }
             do {
@@ -217,16 +221,24 @@ public struct ContactWriter {
         return result
     }
 
-    /// The non-unified cards behind a contact that live in the chosen accounts.
-    private func ownCards(of key: MacKey) -> [CNContact] {
-        guard let unified = find(key) else { return [] }
-        let request = CNContactFetchRequest(keysToFetch: [CNContactIdentifierKey, CNContactGivenNameKey, CNContactFamilyNameKey] as [CNKeyDescriptor])
-        request.unifyResults = false
-        request.predicate = CNContact.predicateForContacts(withIdentifiers: [unified.identifier])
+    /// The cards in the chosen accounts that are linked into this unified
+    /// contact: every card of those accounts whose own unified contact is
+    /// this one. (A unified contact's identifier is one card's, which may
+    /// well live in an account the sync does not cover.)
+    private func ownCards(of unified: CNContact) -> [CNContact] {
+        let keys = [CNContactIdentifierKey, CNContactGivenNameKey, CNContactFamilyNameKey] as [CNKeyDescriptor]
         var cards: [CNContact] = []
-        try? store.enumerateContacts(with: request) { card, _ in
-            let containers = (try? store.containers(matching: CNContainer.predicateForContainerOfContact(withIdentifier: card.identifier))) ?? []
-            if containers.contains(where: { containerIDs.contains($0.identifier) }) { cards.append(card) }
+        for container in containerIDs {
+            let request = CNContactFetchRequest(keysToFetch: keys)
+            request.unifyResults = false
+            request.predicate = CNContact.predicateForContactsInContainer(withIdentifier: container)
+            try? store.enumerateContacts(with: request) { card, _ in
+                if card.identifier == unified.identifier
+                    || (try? store.unifiedContact(withIdentifier: card.identifier, keysToFetch: [CNContactIdentifierKey as CNKeyDescriptor]))?
+                        .identifier == unified.identifier {
+                    cards.append(card)
+                }
+            }
         }
         return cards
     }

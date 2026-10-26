@@ -220,7 +220,8 @@ private func syncedMirror() -> CalendarMirror {
     var old = syncedMirror()
     old.entries[0].base.date = PalmDate(year: 2026, month: 3, day: 1)
     let plan = try engine.plan(palm: .modified([]), palmCategories: palmCategories, mac: [], mirror: old)
-    #expect(plan.palmDeletes == [0x1001])
+    #expect(plan.agedOut == [0x1001] && plan.palmDeletes.isEmpty)
+    #expect(plan.massDeletion(mirrorEntries: 1) == nil)   // housekeeping, not a deletion
     #expect(plan.macDeletes.isEmpty && plan.entries.isEmpty)
 }
 
@@ -407,4 +408,14 @@ private func syncedMirror() -> CalendarMirror {
     names.removeLast()
     let (db2, _, _) = plan.palmDatabase(categories: CategoryAppInfo(names: names + [""]))
     #expect(db2.records[0].category == 15)   // a free slot: taken
+}
+
+@Test func newIDsClearTheOpaqueRecords() throws {
+    // an unreadable record with the highest ID on the Palm: a new Mac record must not reuse its ID
+    let garbage = PalmRecordIn(id: 0x1009, attributes: 0, category: 0, data: Data([0xFF, 0xFF, 0xFF]))
+    let plan = try engine.plan(palm: .all([garbage]), palmCategories: palmCategories,
+                               mac: items([macEvent("Standup", standupStart)]), mirror: SyncMirror(pcID: 7))
+    let (db, palmIDs, _) = plan.palmDatabase(categories: CategoryAppInfo(names: palmCategories))
+    #expect(Set(db.records.map(\.uniqueID)).count == db.records.count)
+    #expect(palmIDs.values.allSatisfy { $0 > 0x1009 } && db.uniqueIDSeed > 0x100A)
 }

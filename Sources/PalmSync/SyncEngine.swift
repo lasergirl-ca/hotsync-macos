@@ -151,7 +151,11 @@ public struct SyncPlan<Item: SyncedItem>: Equatable, Sendable {
     }
 
     public var palmWrites: [PalmWrite] = []
+    /// Records the user deleted on the Mac: gone from the Palm.
     public var palmDeletes: [UInt32] = []
+    /// Records that left the window: gone from the Palm and the mirror, kept
+    /// on the Mac. Housekeeping, not deletions, so `massDeletion` ignores them.
+    public var agedOut: [UInt32] = []
     public var macCreates: [MacChange] = []
     public var macUpdates: [MacChange] = []
     public var macDeletes: [MacKey] = []
@@ -214,7 +218,8 @@ public struct SyncPlan<Item: SyncedItem>: Equatable, Sendable {
             return categories.names.firstIndex(of: "Other") ?? 0
         }
 
-        var nextID = (entries.compactMap(\.palmID).max() ?? 0) + 1
+        // above every ID on the Palm, the unreadable records' included
+        var nextID = max(entries.compactMap(\.palmID).max() ?? 0, opaque.map(\.id).max() ?? 0) + 1
         var palmIDs: [Int: UInt32] = [:]
         var records: [(item: Item, record: PalmDatabase.Record)] = []
         for (i, entry) in entries.enumerated() {
@@ -234,7 +239,7 @@ public struct SyncPlan<Item: SyncedItem>: Equatable, Sendable {
         let kept = opaque.map {
             PalmDatabase.Record(attributes: $0.attributes & PalmDatabase.Record.secret, category: $0.category, uniqueID: $0.id, data: $0.data)
         }
-        return (records.map(\.record) + kept, palmIDs, categories, max(nextID, (opaque.map(\.id).max() ?? 0) + 1))
+        return (records.map(\.record) + kept, palmIDs, categories, nextID)
     }
 }
 
@@ -379,8 +384,8 @@ public struct SyncEngine<Item: SyncedItem> {
             }
 
             if agedOut {
-                if case .same = palm { plan.palmDeletes.append(entry.palmID) }
-                if case .changed = palm { plan.palmDeletes.append(entry.palmID) }
+                if case .same = palm { plan.agedOut.append(entry.palmID) }
+                if case .changed = palm { plan.agedOut.append(entry.palmID) }
                 plan.log.append("\(base.title ?? "?"): left the window, removed from the Palm")
                 continue
             }
@@ -466,9 +471,10 @@ public struct SyncEngine<Item: SyncedItem> {
             }
         }
 
-        // New on the Palm
+        // New on the Palm, each decoded once (an unreadable one is logged once)
         var newPalm = palmRecords.values.filter { !usedPalm.contains($0.id) && !$0.isDeleted && !$0.isArchived }
             .sorted { $0.id < $1.id }
+            .map { (record: $0, item: palmItem($0)) }
         var newMac = items.filter { !usedMac.contains($0.key) }
 
         if !fast {
@@ -476,12 +482,9 @@ public struct SyncEngine<Item: SyncedItem> {
             var remaining: [MacSyncItem<Item>] = []
             for macItem in newMac {
                 let candidate = macItem.item
-                if let i = newPalm.firstIndex(where: { record in
-                    guard let item = palmItem(record) else { return false }
-                    return item.matches(candidate)
-                }) {
-                    let record = newPalm.remove(at: i)
-                    let palmVersion = palmItem(record)!
+                if let i = newPalm.firstIndex(where: { $0.item?.matches(candidate) ?? false }) {
+                    let (record, decoded) = newPalm.remove(at: i)
+                    let palmVersion = decoded!
                     let secret = record.attributes & PalmDatabase.Record.secret != 0
                     // no common ancestor: the Palm's version stands in for it,
                     // so every difference is a Mac change
@@ -501,8 +504,8 @@ public struct SyncEngine<Item: SyncedItem> {
             newMac = remaining
         }
 
-        for record in newPalm {
-            guard let item = palmItem(record) else {
+        for (record, decoded) in newPalm {
+            guard let item = decoded else {
                 plan.opaque.append(record)    // stays on the Palm untouched
                 continue
             }
