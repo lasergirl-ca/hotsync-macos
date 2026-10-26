@@ -929,7 +929,14 @@ final class AppState {
 
         // Zeitzonen: Orte lesen, abweichende neu schreiben, schließen
         case .timeSet(let date):
-            if let tabId = session.tabId { tabLog(tabId, L10n.logTimeSet(date)) }
+            guard let tabId = session.tabId else { break }
+            if session.dateFixYears > 0 {
+                // der Palm zeigt das echte Jahr; gespeichert ist das verschobene
+                let real = Calendar.current.date(byAdding: .year, value: session.dateFixYears, to: date) ?? date
+                tabLog(tabId, L10n.logTimeSetDateFix(real, storedYear: Calendar.current.component(.year, from: date)))
+            } else {
+                tabLog(tabId, L10n.logTimeSet(date))
+            }
         case .netSyncSet(let address, let name):
             if let tabId = session.tabId { tabLog(tabId, L10n.logNetSyncSet(address, name)) }
         case .dbOpened where session.stage == .fixingLocations:

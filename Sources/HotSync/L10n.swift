@@ -695,6 +695,10 @@ enum L10n {
         "DateFix auf dem Palm: Startjahr \(startYear), Daten und Uhr werden um \(startYear - 1904) Jahre umgerechnet",
         "DateFix on the Palm: start year \(startYear), dates and clock are converted by \(startYear - 1904) years"
     ) }
+    static func logTimeSetDateFix(_ real: Date, storedYear: Int) -> String { s(
+        "Uhr des Palms gestellt: \(real.formatted(date: .abbreviated, time: .shortened)) (DateFix: gespeichert als \(storedYear))",
+        "Palm clock set: \(real.formatted(date: .abbreviated, time: .shortened)) (DateFix: stored as \(storedYear))"
+    ) }
     static func logTimeSet(_ date: Date) -> String { s(
         "Uhr des Palms gestellt: \(date.formatted(date: .abbreviated, time: .shortened))",
         "Palm clock set: \(date.formatted(date: .abbreviated, time: .shortened))"
