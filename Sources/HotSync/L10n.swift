@@ -691,6 +691,10 @@ enum L10n {
         "Die Orte des Palms (Prefs › Datum & Uhrzeit) bekommen bei jedem HotSync die Zeitzonen-Regeln aus der tzdata des Macs – ein Palm OS 5 kennt weder die Regeln von 2007 noch eine Provinz, die die Uhr nicht mehr umstellt. Nach einer Änderung: Soft-Reset, Heimatort in Prefs neu wählen, noch ein HotSync.",
         "The Palm's locations (Prefs › Date & Time) get the time zone rules from the Mac's tzdata at each HotSync – a Palm OS 5 knows neither the 2007 rules nor a province that stopped changing clocks. After a change: soft reset, pick the home location in Prefs again, one more HotSync."
     ) }
+    static func logDateFix(_ startYear: Int) -> String { s(
+        "DateFix auf dem Palm: Startjahr \(startYear), Daten und Uhr werden um \(startYear - 1904) Jahre umgerechnet",
+        "DateFix on the Palm: start year \(startYear), dates and clock are converted by \(startYear - 1904) years"
+    ) }
     static func logTimeSet(_ date: Date) -> String { s(
         "Uhr des Palms gestellt: \(date.formatted(date: .abbreviated, time: .shortened))",
         "Palm clock set: \(date.formatted(date: .abbreviated, time: .shortened))"

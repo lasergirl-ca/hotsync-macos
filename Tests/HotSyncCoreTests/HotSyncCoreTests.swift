@@ -188,6 +188,8 @@ private func imageWithVersion(_ version: String?) -> Data {
     // Windows-1252 from the Palm arrives as UTF-8 escaped by the tool
     #expect(SessionEvent.parse(#"{"event":"connected","user":"M\u00fcller \u20ac","userId":7}"#)
             == .connected(PalmUser(name: "Müller €", userId: 7), romVersion: 0))
+    #expect(SessionEvent.parse(#"{"event":"connected","user":"Z","userId":1,"romVersion":0,"dateFixStartYear":1932}"#)
+            == .connected(PalmUser(name: "Z", userId: 1), romVersion: 0, dateFixStartYear: 1932))
 }
 
 // MARK: - PalmAdmission

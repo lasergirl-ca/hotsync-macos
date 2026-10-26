@@ -645,6 +645,9 @@ final class AppState {
         var twoWayCurrent: String?
         /// aus dem syncInfo-Ereignis: welcher PC zuletzt abgeglichen hat
         var lastSyncPC: UInt32 = 0
+        /// DateFix auf dem Palm: um so viele Jahre sind seine Daten und
+        /// seine Uhr verschoben (0: kein DateFix)
+        var dateFixYears = 0
         /// die zusammengeführte Datenbank, die nach dem Schließen installiert
         /// wird, und der Spiegel, der danach gespeichert wird (liefert die Zahl
         /// seiner Einträge); der PC, der dann als letzter eingetragen wird
@@ -734,9 +737,10 @@ final class AppState {
         case .timeout:
             session.timedOut = true
 
-        case .connected(let user, let romVersion):
+        case .connected(let user, let romVersion, let dateFixStartYear):
             session.connected = true
             session.romVersion = romVersion
+            session.dateFixYears = dateFixStartYear.map { $0 - 1904 } ?? 0
             // ein Palm ist durchgekommen: frühere Fehler hier sind erledigt
             notices.removeAll { if case .failed = $0.kind { return $0.port == port } else { return false } }
             session.user = user
@@ -1170,8 +1174,15 @@ final class AppState {
             let dry = profile.isDryRun
             if dry { tabLog(tabId, L10n.logDryRun) }
             // Uhr vom Mac jetzt, Zeitzonen nach der Sicherung
+            if session.dateFixYears > 0 { tabLog(tabId, L10n.logDateFix(1904 + session.dateFixYears)) }
             if profile.isClockSyncOn {
-                if dry { tabLog(tabId, L10n.logDryRunClock) } else { session.runner.send("settime") }
+                if dry {
+                    tabLog(tabId, L10n.logDryRunClock)
+                } else if session.dateFixYears > 0 {
+                    session.runner.send("settime \(DateFix.offsetDays(startYear: 1904 + session.dateFixYears))")
+                } else {
+                    session.runner.send("settime")
+                }
             }
             // über Kabel: diesen Mac als primären PC für den Netzwerk-HotSync eintragen
             if profile.isNetSyncOn, session.runner.port != SyncTab.networkPort {
@@ -1196,7 +1207,7 @@ final class AppState {
                 } else if profile.lastBackupAt == nil {
                     tabLog(tabId, L10n.logCalendarNeedsBackup)
                 } else {
-                    queueCalendar(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry)
+                    queueCalendar(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears)
                     if !dry { session.checkDatabases.append(CalendarBuilder.databaseName) }
                 }
             }
@@ -1207,7 +1218,7 @@ final class AppState {
                 } else if profile.lastBackupAt == nil {
                     tabLog(tabId, L10n.logContactsNeedBackup)
                 } else {
-                    queueContacts(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry)
+                    queueContacts(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears)
                     if !dry { session.checkDatabases.append(ContactsBuilder.databaseName) }
                 }
             }
@@ -1222,7 +1233,7 @@ final class AppState {
                     // Reminders liefert asynchron; der Palm wartet solange (Lebenszeichen)
                     Task { @MainActor [weak self, weak session] in
                         guard let self, let session else { return }
-                        await self.queueTasks(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry)
+                        await self.queueTasks(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears)
                         self.startQueue(session, profileId: profileId, tabId: tabId, user: user, queue: queue, mode: mode)
                     }
                     return
@@ -1327,12 +1338,21 @@ final class AppState {
         return dir.appendingPathComponent("\(name).pdb")
     }
 
-    private func queueCalendar(_ settings: CalendarSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue, dryRun: Bool) {
+    /// Schreibt eine gebaute Datenbank; für einen Palm mit DateFix in dessen Jahren.
+    private func writeDatabase(_ db: PalmDatabase, to url: URL, dateFixYears: Int) throws -> Int {
+        let image = DateFix.shift(db, years: -dateFixYears).encode()
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try image.write(to: url, options: .atomic)
+        return image.count
+    }
+
+    private func queueCalendar(_ settings: CalendarSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue, dryRun: Bool,
+                               dateFixYears: Int) {
         guard let profile = deviceManager.profile(profileId) else { return }
         do {
             let run = try CalendarSyncRun(settings: settings, source: calendarSource)
             let url = try syncTarget(CalendarBuilder.databaseName, for: profile, dryRun: dryRun)
-            let bytes = try run.write(to: url)
+            let bytes = try writeDatabase(run.database, to: url, dateFixYears: dateFixYears)
             if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(CalendarBuilder.databaseName, run.report.records, bytes)); return }
             queue.refresh()
             tabLog(tabId, L10n.logCalendarQueued(run.report.records, run.report.seriesMapped, bytes))
@@ -1471,7 +1491,14 @@ final class AppState {
         let mirror = (try? SyncMirror<Item>.load(from: url)) ?? SyncMirror<Item>(pcID: SyncMirror<Item>.newPCID())
         let fast = mirror.lastSync != nil && session.lastSyncPC == mirror.pcID
         tabLog(tabId, L10n.logTwoWayMode(what, fast: fast, lastSyncPC: session.lastSyncPC, mirrorEntries: mirror.entries.count))
-        let palm = PalmSnapshot.all(session.calendarRecords)   // es wird immer alles gelesen
+        // es wird immer alles gelesen; mit DateFix in echten Jahren
+        let kind = DateFix.Kind(creator: session.twoWayCurrent == ContactsBuilder.databaseName ? "PAdd"
+                                : session.twoWayCurrent == TasksBuilder.databaseName ? "PTod" : "PDat")!
+        let palm = PalmSnapshot.all(session.calendarRecords.map { record in
+            var r = record
+            r.data = DateFix.shift(record.data, kind: kind, years: session.dateFixYears)
+            return r
+        })
         do {
             let plan = try engine.plan(palm: palm, palmCategories: palmCategories, mac: mac, mirror: mirror)
             tabLog(tabId, L10n.logTwoWaySummary(what, toPalm: plan.palmWrites.count, palmDeletes: plan.palmDeletes.count,
@@ -1500,8 +1527,7 @@ final class AppState {
             let (db, palmIDs) = palmDatabase(plan)
             let after = plan.mirror(after: mirror, palmIDs: palmIDs, macKeys: result.createdKeys)
             let dbURL = mirrorURL("\(db.name).pdb", for: profile)
-            try FileManager.default.createDirectory(at: dbURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try db.encode().write(to: dbURL, options: .atomic)
+            _ = try writeDatabase(db, to: dbURL, dateFixYears: session.dateFixYears)
             session.twoWayInstall = dbURL
             session.twoWayPCID = after.pcID
             session.twoWayMirrorSave = { try after.save(to: url); return after.entries.count }
@@ -1730,12 +1756,13 @@ final class AppState {
     }
 
     /// Baut TasksDB-PTod aus Reminders.app und legt es in die Warteschlange.
-    private func queueTasks(_ settings: TaskSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue, dryRun: Bool) async {
+    private func queueTasks(_ settings: TaskSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue, dryRun: Bool,
+                            dateFixYears: Int) async {
         guard let profile = deviceManager.profile(profileId) else { return }
         do {
             let run = try await TaskSyncRun(settings: settings, source: reminderSource)
             let url = try syncTarget(TasksBuilder.databaseName, for: profile, dryRun: dryRun)
-            let bytes = try run.write(to: url)
+            let bytes = try writeDatabase(run.database, to: url, dateFixYears: dateFixYears)
             if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(TasksBuilder.databaseName, run.report.records, bytes)); return }
             queue.refresh()
             tabLog(tabId, L10n.logTasksQueued(run.report.records, run.report.completedSkipped, bytes))
@@ -1748,12 +1775,13 @@ final class AppState {
     }
 
     /// Baut ContactsDB-PAdd aus Contacts.app und legt es in die Warteschlange.
-    private func queueContacts(_ settings: ContactSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue, dryRun: Bool) {
+    private func queueContacts(_ settings: ContactSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue, dryRun: Bool,
+                               dateFixYears: Int) {
         guard let profile = deviceManager.profile(profileId) else { return }
         do {
             let run = try ContactSyncRun(settings: settings, source: contactSource)
             let url = try syncTarget(ContactsBuilder.databaseName, for: profile, dryRun: dryRun)
-            let bytes = try run.write(to: url)
+            let bytes = try writeDatabase(run.database, to: url, dateFixYears: dateFixYears)
             if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(ContactsBuilder.databaseName, run.report.records, bytes)); return }
             queue.refresh()
             tabLog(tabId, L10n.logContactsQueued(run.report.records, run.report.categories.count - 1, bytes))

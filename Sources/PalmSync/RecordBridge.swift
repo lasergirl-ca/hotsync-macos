@@ -41,7 +41,7 @@ public actor RecordBridge {
     /// sync info that follows (nil if the tool reported none).
     public func waitForPalm() async throws -> (user: PalmUser, romVersion: UInt32, lastSyncPC: UInt32, lastSyncDate: Date?) {
         let (user, rom) = try await expect("connect") { event -> (PalmUser, UInt32)? in
-            if case .connected(let user, let rom) = event { return (user, rom) }
+            if case .connected(let user, let rom, _) = event { return (user, rom) }
             return nil
         }
         // syncInfo comes right behind connected

@@ -708,6 +708,19 @@ static int report_identity(int sd)
 	emit_str("user", user.username, 1);
 	emit_int("userId", (long)user.userID);
 	emit_int("romVersion", (long)sys.romVersion);
+	/* DateFix (Epoche verschoben, damit der Palm nach 2031 weiterläuft):
+	 * seine Einstellung ist 6 Bytes - Version(2) Startjahr(2) an(1)
+	 * laufende Umstellung(1). Ist es an, sieht der HotSync alle Daten um
+	 * Startjahr - 1904 Jahre verschoben, und die Uhr ebenso. */
+	{
+		unsigned char pref[16];
+		size_t size = 0;
+		int version = 0;
+		if (dlp_ReadAppPreference(sd, 0x44744678UL /* 'DtFx' */, 0, 1, sizeof(pref), pref, &size, &version) >= 0
+		    && size == 6 && version == 2 && pref[4] != 0) {
+			emit_int("dateFixStartYear", (long)((pref[2] << 8) | pref[3]));
+		}
+	}
 	emit_end();
 
 	/* Für den Abgleich: welcher PC zuletzt abgeglichen hat (0: keiner oder
@@ -1123,11 +1136,12 @@ static void write_sync_info(int sd, const char *args)
 	emit_end();
 }
 
-/* "settime": die Uhr des Palms auf die Ortszeit des Macs stellen, wie es
- * der HotSync-Manager tat. libpisock rechnet time_t in die lokale Zeit um. */
-static void set_time(int sd)
+/* "settime [TAGE]": die Uhr des Palms auf die Ortszeit des Macs stellen,
+ * wie es der HotSync-Manager tat; libpisock rechnet time_t in die lokale
+ * Zeit um. TAGE: um so viele Tage zurück, für einen Palm mit DateFix. */
+static void set_time(int sd, long days_back)
 {
-	time_t now = time(NULL);
+	time_t now = time(NULL) - (time_t)days_back * 86400;
 
 	if (dlp_SetSysDateTime(sd, now) < 0) {
 		emit_dlp_error(sd, "settime", "cannot set the clock");
@@ -1246,7 +1260,9 @@ static void run_commands(int sd)
 		} else if (strncmp(line, "syncinfo ", 9) == 0) {
 			write_sync_info(sd, line + 9);
 		} else if (strcmp(line, "settime") == 0) {
-			set_time(sd);
+			set_time(sd, 0);
+		} else if (strncmp(line, "settime ", 8) == 0) {
+			set_time(sd, atol(line + 8));
 		} else if (strncmp(line, "netsync ", 8) == 0) {
 			write_net_sync(sd, line + 8);
 		} else if (strncmp(line, "log ", 4) == 0) {

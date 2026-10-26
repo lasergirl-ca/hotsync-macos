@@ -21,7 +21,9 @@ public struct PalmUser: Equatable, Sendable, Codable {
 public enum SessionEvent: Equatable, Sendable {
     case listening(port: String)
     case timeout
-    case connected(PalmUser, romVersion: UInt32)
+    /// `dateFixStartYear`: DateFix is on, the Palm's dates and clock are
+    /// shifted by that year minus 1904
+    case connected(PalmUser, romVersion: UInt32, dateFixStartYear: Int? = nil)
     case installing(file: String)
     case progress(bytes: Int)
     case installed(file: String, bytes: Int)
@@ -103,6 +105,7 @@ public enum SessionEvent: Equatable, Sendable {
         let pcId: UInt32?
         let date: Int?
         let address: String?
+        let dateFixStartYear: Int?
     }
 
     /// Reads one output line; nil for anything that is not a known event
@@ -119,7 +122,7 @@ public enum SessionEvent: Equatable, Sendable {
             return .timeout
         case "connected":
             guard let name = l.user, let userId = l.userId else { return nil }
-            return .connected(PalmUser(name: name, userId: userId), romVersion: l.romVersion ?? 0)
+            return .connected(PalmUser(name: name, userId: userId), romVersion: l.romVersion ?? 0, dateFixStartYear: l.dateFixStartYear)
         case "installing":
             guard let file = l.file else { return nil }
             return .installing(file: file)
