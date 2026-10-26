@@ -187,12 +187,12 @@ enum L10n {
     static func portNetworkHint(_ ip: String?, all: Bool) -> String {
         let address = ip ?? s("keine Adresse", "no address")
         let where_ = all
-            ? s("Lauscht auf TCP 14238 auf jeder Schnittstelle – auch Ethernet und VPN. Der Netzwerk-HotSync kennt kein Passwort: jeder im selben Netz, der die Benutzer-ID eines Palms kennt, kann sich als dieser melden. Besser nur das WLAN.",
+            ? s("Lauscht auf TCP-Port 14238 auf jeder Schnittstelle – auch Ethernet und VPN. Der Netzwerk-HotSync kennt kein Passwort: jeder im selben Netz, der die Benutzer-ID eines Palms kennt, kann sich als dieser melden. Besser nur das WLAN.",
                 "Listens on TCP 14238 on every interface – Ethernet and VPN included. Network HotSync has no password: anyone on the same network who knows a Palm's user ID can connect as it. Better to pick the Wi-Fi alone.")
-            : s("Lauscht auf TCP 14238 nur auf dieser Schnittstelle, wie der HotSync-Manager (Netzwerk-HotSync); der Netzwerk-HotSync kennt kein Passwort, die Benutzer-ID des Palms ist die ganze Prüfung.",
+            : s("Lauscht auf TCP-Port 14238 nur auf dieser Schnittstelle, wie der HotSync-Manager (Netzwerk-HotSync); der Netzwerk-HotSync kennt kein Passwort, die Benutzer-ID des Palms ist die ganze Prüfung.",
                 "Listens on TCP 14238 on this interface only, like HotSync Manager did (network HotSync); network HotSync has no password, the Palm's user ID is the whole check.")
         return where_ + s(
-            " Auf dem Palm: HotSync › Menü › Modem-Sync-Einst. › Netzwerk, dann Menü › Primärer PC-Setup, Adresse dieses Macs: \(address). Beim ersten Mal fragt macOS, ob HotSync eingehende Verbindungen annehmen darf. Der erste HotSync eines Palms und jeder Abgleich in beide Richtungen nach einem Reset brauchen das Kabel.",
+            " Auf dem Palm: HotSync › Menü › Modem-Sync-Einst. › Netzwerk, dann Menü › Primäres PC-Setup, Adresse dieses Macs: \(address). Beim ersten Mal fragt macOS, ob HotSync eingehende Verbindungen annehmen darf. Der erste HotSync eines Palms und jeder Abgleich in beide Richtungen nach einem Reset brauchen das Kabel.",
             " On the Palm: HotSync › menu › Modem Sync Prefs › Network, then menu › Primary PC Setup, this Mac's address: \(address). The first time, macOS asks whether HotSync may accept incoming connections. A Palm's first HotSync, and a two-way sync after a reset, need the cable."
         )
     }
@@ -216,8 +216,8 @@ enum L10n {
     }
     static var tabSyncMode: String { s("HotSync", "HotSync") }
     static var tabSyncModeHint: String { s(
-        "„Abgleichen“ ist der Kalender- und Kontakte-Abgleich, wie er im Tab eingestellt ist; „Installieren“ die Warteschlange; „Sichern“ holt nach den Installationen die Datenbanken im RAM des Palms auf den Mac – beim ersten Mal alle, danach nur die geänderten. Für einen langsamen seriellen Tab kann „Nur installieren“ sinnvoll sein.",
-        "“Sync” is the calendar and contacts sync as set up in the tab; “Install” the queue; “Back Up” fetches the Palm's RAM databases to the Mac after the installs – all of them the first time, then only the changed ones. For a slow serial tab, “Install Only” can make sense."
+        "„Abgleichen“ ist der Abgleich von Kalender, Kontakten, Aufgaben, Uhr und Zeitzonen, wie er für diesen Palm eingestellt ist; „Installieren“ die Warteschlange; „Sichern“ holt nach den Installationen die Datenbanken im RAM des Palms auf den Mac – beim ersten Mal alle, danach nur die geänderten. Für einen langsamen seriellen Tab kann „Nur installieren“ sinnvoll sein.",
+        "“Sync” is the Calendar, Contacts, Tasks, clock and time-zone sync as set up for this Palm; “Install” the queue; “Back Up” fetches the Palm's RAM databases to the Mac after the installs – all of them the first time, then only the changed ones. For a slow serial tab, “Install Only” can make sense."
     ) }
     static func modeName(_ mode: HotSyncMode) -> String {
         switch mode {
@@ -562,7 +562,7 @@ enum L10n {
         "Prüfe \(name) auf dem Palm …", "Checking \(name) on the Palm …"
     ) }
     static func logCalendarChecked(_ name: String, _ records: Int, _ identical: Int, _ different: Int, _ deleted: Int, _ categories: [String]) -> String { s(
-        "\(name) auf dem Palm: \(records) Datensätze, \(identical) lesbar, \(different) abweichend, \(deleted) gelöscht; Kategorien: \(categories.joined(separator: ", "))",
+        "\(name) auf dem Palm: \(records) Datensätze, \(identical) identisch, \(different) abweichend, \(deleted) gelöscht; Kategorien: \(categories.joined(separator: ", "))",
         "\(name) on the Palm: \(records) records, \(identical) decode, \(different) differ, \(deleted) deleted; categories: \(categories.joined(separator: ", "))"
     ) }
     static var dryRunTitle: String { s("Probelauf", "Dry run") }
@@ -614,14 +614,14 @@ enum L10n {
         "\(what): the mirror \(file) cannot be read (\(reason)) – sync skipped; check or set the file aside, then the next HotSync pairs by content"
     ) }
     static var logDryRun: String { s("Probelauf: die Abgleiche schreiben nichts", "Dry run: the syncs write nothing") }
-    static var logDryRunClock: String { s("Probelauf: die Uhr des Palms würde gestellt", "Dry run: the Palm's clock would be set") }
+    static var logDryRunClock: String { s("Probelauf: die Uhr des Palms würde gestellt werden", "Dry run: the Palm's clock would be set") }
     static func logDryRunWouldInstall(_ name: String, _ records: Int, _ bytes: Int) -> String { s(
-        "Probelauf: \(name) würde installiert (\(records) Einträge, \(bytes) Bytes), liegt unter Sync/DryRun",
+        "Probelauf: \(name) würde installiert werden (\(records) Einträge, \(bytes) Bytes), liegt unter Sync/DryRun",
         "Dry run: \(name) would be installed (\(records) records, \(bytes) bytes), kept under Sync/DryRun"
     ) }
     static var twoWayToggle: String { s("In beide Richtungen", "Two-way") }
     static var twoWayHintContacts: String { s(
-        "Der HotSync liest die Kontakte des Palms, führt sie Feld für Feld mit dem Mac zusammen und schreibt beide Seiten: Mac-Änderungen über das Contacts-Framework in Kontakte.app (und damit in iCloud), der Palm bekommt die zusammengeführten Kontakte als Ganzes. Notizen und was über die Felder des Palms hinausgeht, bleibt auf dem Mac.",
+        "Der HotSync liest die Kontakte des Palms, führt sie Feld für Feld mit dem Mac zusammen und schreibt beide Seiten: Mac-Änderungen über die Kontakte-Schnittstelle von macOS in Kontakte.app (und damit in iCloud), der Palm bekommt die zusammengeführten Kontakte als Ganzes. Notizen und was über die Felder des Palms hinausgeht, bleiben auf dem Mac.",
         "The HotSync reads the Palm's contacts, merges them field by field with the Mac and writes both sides: Mac changes through the Contacts framework into Contacts.app (and on to iCloud), the Palm gets the merged contacts whole. Notes and whatever exceeds the Palm's fields stay on the Mac."
     ) }
     static var twoWayHintTasks: String { s(
@@ -629,14 +629,14 @@ enum L10n {
         "The HotSync reads the Palm's tasks, merges them field by field with the Mac and writes both sides: Mac changes through EventKit into Reminders.app (and on to iCloud), the Palm gets the merged tasks whole."
     ) }
     static var twoWayHint: String { s(
-        "Der HotSync liest den Kalender des Palms, führt ihn Feld für Feld mit dem Mac zusammen und schreibt beide Seiten: Mac-Änderungen über EventKit in Calendar.app (und damit in iCloud/Google), der Palm bekommt den zusammengeführten Kalender als Ganzes. Beim ersten Mal lohnt ein Probelauf.",
+        "Der HotSync liest den Kalender des Palms, führt ihn Feld für Feld mit dem Mac zusammen und schreibt beide Seiten: Mac-Änderungen über EventKit in Kalender.app (und damit in iCloud/Google), der Palm bekommt den zusammengeführten Kalender als Ganzes. Beim ersten Mal lohnt sich ein Probelauf.",
         "The HotSync reads the Palm's calendar, merges it field by field with the Mac and writes both sides: Mac changes through EventKit into Calendar.app (and on to iCloud/Google), the Palm gets the merged calendar whole. A dry run first is worth it."
     ) }
     static var twoWayCalendar: String { s("Kalender", "Calendar") }
     static var twoWayContacts: String { s("Kontakte", "Contacts") }
     static var twoWayTasks: String { s("Aufgaben", "Tasks") }
     static func logTwoWayPending(_ what: String) -> String { s(
-        "\(what): Abgleich in beide Richtungen nach der Sicherung; nichts wird als Ganzes installiert",
+        "\(what): Abgleich in beide Richtungen nach der Sicherung",
         "\(what): two-way sync after the backup; nothing is installed whole"
     ) }
     static func logTwoWayReading(_ what: String) -> String { s("\(what): lese vom Palm …", "\(what): reading from the Palm …") }
@@ -657,7 +657,7 @@ enum L10n {
         }
     }
     static var conflictPolicyHelp: String { s(
-        "Wenn beide Seiten dasselbe Feld desselben Termins verschieden geändert haben. „Beide behalten“ legt die Palm-Fassung als zweiten Termin auf beiden Seiten an, wie der Palm Desktop.",
+        "Wenn beide Seiten dasselbe Feld desselben Eintrags verschieden geändert haben. „Beide behalten“ legt die Palm-Fassung als zweiten Eintrag auf beiden Seiten an, wie es Palm Desktop tat.",
         "When both sides changed the same field of the same event differently. “Keep both” makes the Palm's version a second event on both sides, as the Palm Desktop did."
     ) }
     static func logTwoWayToPalm(_ title: String, new: Bool) -> String { s(
@@ -678,15 +678,15 @@ enum L10n {
     static func logTwoWayMacApplied(_ created: Int, _ updated: Int, _ deleted: Int) -> String { s(
         "Mac: \(created) neu, \(updated) geändert, \(deleted) gelöscht", "Mac: \(created) created, \(updated) updated, \(deleted) deleted"
     ) }
-    static func logTwoWayMacFailure(_ text: String) -> String { s("Mac, nicht geschrieben: \(text)", "Mac, not written: \(text)") }
+    static func logTwoWayMacFailure(_ text: String) -> String { s("Auf dem Mac nicht geschrieben: \(text)", "Mac, not written: \(text)") }
     static func logTwoWayPalmInstalling(_ what: String, _ records: Int) -> String { s(
-        "Palm: \(what) zusammengeführt (\(records) Einträge) wird installiert …", "Palm: installing the merged \(what) (\(records) records) …"
+        "Palm: \(what) zusammengeführt, \(records) Einträge werden installiert …", "Palm: installing the merged \(what) (\(records) records) …"
     ) }
     static func logTwoWayMirrorSaved(_ entries: Int) -> String { s(
         "Spiegel gespeichert: \(entries) Einträge", "Mirror saved: \(entries) entries"
     ) }
     static var logTwoWayDone: String { s("Abgleich in beide Richtungen fertig; dieser Mac ist als letzter PC eingetragen", "Two-way sync done; this Mac is recorded as the last PC") }
-    static func logTwoWayFailed(_ reason: String) -> String { s("Probelauf abgebrochen: \(reason)", "Dry run stopped: \(reason)") }
+    static func logTwoWayFailed(_ reason: String) -> String { s("Abgleich abgebrochen: \(reason)", "Sync stopped: \(reason)") }
     static var taskSyncTitle: String { s("Aufgaben: Mac → Palm", "Tasks: Mac → Palm") }
     static var taskSyncTitleTwoWay: String { s("Aufgaben: Mac ↔ Palm", "Tasks: Mac ↔ Palm") }
     static var taskSyncToggle: String { s("Aufgaben abgleichen", "Sync Tasks") }
@@ -701,7 +701,7 @@ enum L10n {
         "No access to Reminders: allow it in System Settings under Privacy & Security › Reminders"
     ) }
     static var taskSyncHint: String { s(
-        "Jede Liste wird eine Kategorie auf dem Palm (bis 15). Erledigte Aufgaben bleiben so viele Tage auf dem Palm:",
+        "Jede Liste wird zu einer Kategorie auf dem Palm (bis 15). Erledigte Aufgaben bleiben so viele Tage auf dem Palm:",
         "Each list becomes a category on the Palm (up to 15). Completed tasks stay on the Palm for this many days:"
     ) }
     static func taskSyncDays(_ days: Int) -> String { s("\(days) Tage", "\(days) days") }
@@ -728,7 +728,7 @@ enum L10n {
         "Diesen Mac als primären PC für den Netzwerk-HotSync eintragen", "Set this Mac as the Palm's primary PC for network HotSync"
     ) }
     static func netSyncHint(_ ip: String?, _ name: String) -> String { s(
-        "Bei jedem Kabel-HotSync bekommt der Palm Adresse und Namen dieses Macs (\(ip ?? "–"), \(name)) in seine Netzwerk-HotSync-Einstellungen, wie beim HotSync-Manager. Danach steht unter HotSync › Menü › Primärer PC-Setup schon dieser Mac; für einen HotSync über WLAN braucht ein Tab den Anschluss „Netzwerk (WLAN)“.",
+        "Bei jedem Kabel-HotSync bekommt der Palm Adresse und Namen dieses Macs (\(ip ?? "–"), \(name)) in seine Netzwerk-HotSync-Einstellungen, wie beim HotSync-Manager. Danach steht unter HotSync › Menü › Primäres PC-Setup schon dieser Mac; für einen HotSync über WLAN braucht ein Tab den Anschluss „Netzwerk (WLAN)“.",
         "At each cable HotSync the Palm gets this Mac's address and name (\(ip ?? "–"), \(name)) in its network HotSync settings, as HotSync Manager did. HotSync › menu › Primary PC Setup then already shows this Mac; a HotSync over Wi-Fi needs a tab on the “Network (Wi-Fi)” port."
     ) }
     static func logNetSyncSet(_ address: String, _ name: String) -> String { s(
@@ -738,15 +738,15 @@ enum L10n {
         "Kein primärer PC eingetragen: dieser Mac hat keine Netzwerkadresse", "Primary PC not written: this Mac has no network address"
     ) }
     static func logDryRunNetSync(_ address: String) -> String { s(
-        "Probelauf: dieser Mac (\(address)) würde als primärer PC eingetragen", "Dry run: this Mac (\(address)) would be written as the primary PC"
+        "Probelauf: dieser Mac (\(address)) würde als primärer PC eingetragen werden", "Dry run: this Mac (\(address)) would be written as the primary PC"
     ) }
     static var clockSyncToggle: String { s("Uhr des Palms vom Mac stellen", "Set the Palm's clock from the Mac") }
     static var clockSyncHint: String { s(
         "Bei jedem HotSync, wie beim HotSync-Manager.", "At each HotSync, as the HotSync Manager did."
     ) }
-    static var zoneSyncToggle: String { s("Zeitzonen des Palms aus der tzdata des Macs nachführen", "Update the Palm's time zones from the Mac's tzdata") }
+    static var zoneSyncToggle: String { s("Zeitzonen des Palms mit den Zeitzonendaten des Macs aktualisieren", "Update the Palm's time zones from the Mac's tzdata") }
     static var zoneSyncHint: String { s(
-        "Die Orte des Palms (Prefs › Datum & Uhrzeit) bekommen bei jedem HotSync die Zeitzonen-Regeln aus der tzdata des Macs – ein Palm OS 5 kennt weder die Regeln von 2007 noch eine Provinz, die die Uhr nicht mehr umstellt. Nach einer Änderung: Soft-Reset, Heimatort in Prefs neu wählen, noch ein HotSync.",
+        "Die Orte des Palms (Einstellungen › Datum & Uhrzeit) bekommen bei jedem HotSync die Zeitzonen-Regeln aus den Zeitzonendaten des Macs – ein Palm OS 5 kennt weder die Regeln von 2007 noch eine Provinz, die die Uhr nicht mehr umstellt. Nach einer Änderung: Soft-Reset, Heimatort in Prefs neu wählen, noch ein HotSync.",
         "The Palm's locations (Prefs › Date & Time) get the time zone rules from the Mac's tzdata at each HotSync – a Palm OS 5 knows neither the 2007 rules nor a province that stopped changing clocks. After a change: soft reset, pick the home location in Prefs again, one more HotSync."
     ) }
     static func logDateFix(_ startYear: Int) -> String { s(
@@ -797,7 +797,7 @@ enum L10n {
         "No access to Contacts: allow it in System Settings under Privacy & Security › Contacts"
     ) }
     static var contactSyncGroupsHint: String { s(
-        "Gruppen werden Kategorien auf dem Palm (bis 15); Notizen bleiben auf dem Mac, macOS gibt sie nicht heraus.",
+        "Gruppen werden zu Kategorien auf dem Palm (bis 15); Notizen bleiben auf dem Mac, macOS gibt sie nicht frei.",
         "Groups become categories on the Palm (up to 15); notes stay on the Mac, macOS does not hand them out."
     ) }
     static var contactSyncNoContainers: String { s("Noch kein Konto gewählt", "No account chosen yet") }
@@ -821,7 +821,7 @@ enum L10n {
         "Contacts not put on the Palm yet: a backup of this Palm has to exist first (this HotSync makes it)"
     ) }
     static func logCalendarRecordDiffers(_ id: UInt32, _ bytes: Int, _ hex: String) -> String { s(
-        "Datensatz \(id) (\(bytes) Bytes) kommt anders zurück: \(hex) …",
+        "Datensatz \(id) (\(bytes) Bytes) weicht nach dem Neukodieren ab: \(hex) …",
         "Record \(id) (\(bytes) bytes) does not come back the same: \(hex) …"
     ) }
     static func logCalendarCheckFailed(_ name: String, _ stage: String, _ message: String) -> String { s(
