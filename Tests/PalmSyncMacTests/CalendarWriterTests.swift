@@ -120,3 +120,24 @@ private let vancouver: Calendar = {
     CalendarWriter.fill(ek, from: event, in: vancouver, fields: [.note])
     #expect(ek.notes == "bring the badge" && ek.url?.absoluteString == "https://example.com/conf")
 }
+
+@Test func palmDailyUntilBecomesAMultiDayAllDayEvent() {
+    let palm = SyncedEvent(date: PalmDate(year: 2026, month: 10, day: 20), title: "Conference",
+                           repeatRule: .init(type: .daily, endDate: PalmDate(year: 2026, month: 10, day: 22), frequency: 1), category: "Work")
+    #expect(CalendarWriter.multiDayEnd(of: palm) == PalmDate(year: 2026, month: 10, day: 22))
+    let ek = EKEvent(eventStore: store)
+    CalendarWriter.fill(ek, from: palm, in: vancouver)
+    #expect(ek.isAllDay && (ek.recurrenceRules?.isEmpty ?? true))
+    #expect(Calendar.current.component(.day, from: ek.startDate) == 20 && Calendar.current.component(.day, from: ek.endDate) == 22)
+
+    // the Palm extends it by a day: only the end moves, still no rule
+    var longer = palm
+    longer.repeatRule?.endDate = PalmDate(year: 2026, month: 10, day: 23)
+    CalendarWriter.fill(ek, from: longer, in: vancouver, fields: [.repeatRule])
+    #expect(Calendar.current.component(.day, from: ek.endDate) == 23 && (ek.recurrenceRules?.isEmpty ?? true))
+
+    // a daily rule with a skipped day is a real recurrence
+    var skipping = palm
+    skipping.exceptions = [PalmDate(year: 2026, month: 10, day: 21)]
+    #expect(CalendarWriter.multiDayEnd(of: skipping) == nil)
+}

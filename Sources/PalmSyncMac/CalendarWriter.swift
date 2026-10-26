@@ -51,9 +51,19 @@ public struct CalendarWriter {
     /// has no say in (attendees, URL, travel time, a second alarm, the
     /// zone of an existing event, the length of a multi-day event) are
     /// left alone.
+    /// An untimed event repeating daily through an end date, with no day
+    /// skipped, is how the Palm holds a multi-day all-day event: its last
+    /// day, or nil for anything else.
+    public static func multiDayEnd(of event: SyncedEvent) -> PalmDate? {
+        guard event.time == nil, let rule = event.repeatRule, rule.type == .daily, rule.frequency == 1,
+              let end = rule.endDate, event.exceptions.isEmpty else { return nil }
+        return end
+    }
+
     public static func fill(_ ek: EKEvent, from event: SyncedEvent, in calendar: Calendar, fields: Set<SyncedEvent.Field>? = nil) {
         let isNew = fields == nil
         func wanted(_ f: SyncedEvent.Field) -> Bool { fields?.contains(f) ?? true }
+        let multiDayEnd = multiDayEnd(of: event)
 
         if wanted(.title) { ek.title = event.title ?? "" }
         if wanted(.note) {
@@ -86,7 +96,9 @@ public struct CalendarWriter {
                 // EventKit keeps an all-day event on the device's local day
                 let start = date(event.date, nil, in: Calendar.current)
                 var end = Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: start)!
-                if !isNew, ek.isAllDay, let oldStart = ek.startDate, let oldEnd = ek.endDate {
+                if let lastDay = multiDayEnd {
+                    end = Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: date(lastDay, nil, in: Calendar.current))!
+                } else if !isNew, ek.isAllDay, let oldStart = ek.startDate, let oldEnd = ek.endDate {
                     end = start.addingTimeInterval(oldEnd.timeIntervalSince(oldStart))
                 }
                 ek.isAllDay = true
@@ -111,7 +123,12 @@ public struct CalendarWriter {
 
         if wanted(.repeatRule) {
             if let existing = ek.recurrenceRules { for rule in existing { ek.removeRecurrenceRule(rule) } }
-            if let rule = event.repeatRule {
+            if let lastDay = multiDayEnd {
+                // the Palm's daily-until is the Mac's multi-day event: its end moves, no rule
+                if !(wanted(.date) || wanted(.time)), ek.isAllDay, ek.startDate != nil {
+                    ek.endDate = Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: date(lastDay, nil, in: Calendar.current))!
+                }
+            } else if let rule = event.repeatRule {
                 ek.addRecurrenceRule(recurrenceRule(rule, start: event.date, in: calendar))
             }
         }

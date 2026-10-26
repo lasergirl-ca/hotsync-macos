@@ -272,6 +272,13 @@ public struct CalendarBuilder {
 
         if event.isAllDay {
             record.time = nil
+            // several days: the Palm has no end date, so it repeats daily
+            // through the last day, as Palm Desktop did (EventKit's end of
+            // an all-day event lies on its last day)
+            let lastDay = PalmDate(event.end, in: calendar)
+            if lastDay > date, event.recurrence == nil {
+                record.repeatRule = .init(type: .daily, endDate: lastDay, frequency: 1)
+            }
         } else {
             let start = calendar.dateComponents([.hour, .minute], from: event.start)
             var end = calendar.dateComponents([.hour, .minute], from: event.end)

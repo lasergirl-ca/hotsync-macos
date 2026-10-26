@@ -282,3 +282,17 @@ private func decoded(_ db: PalmDatabase) -> [CalendarEvent] {
     #expect(items.count == 1 && report.exceptions == 0)
     #expect(items[0].event.exceptions.isEmpty)
 }
+
+@Test func multiDayAllDayEventRepeatsDailyThroughItsLastDay() {
+    // Oct 20-22 all day on the Mac (EventKit's end: the last day, 23:59:59)
+    let start = at(2026, 10, 20)
+    let end = at(2026, 10, 22, 23, 59)
+    let trip = MacEvent(seriesID: "trip", calendarID: "ical-work", title: "Conference", start: start, end: end, isAllDay: true)
+    let (items, _) = builder().items([trip])
+    let record = items[0].event
+    #expect(record.time == nil && record.date == PalmDate(year: 2026, month: 10, day: 20))
+    #expect(record.repeatRule == .init(type: .daily, endDate: PalmDate(year: 2026, month: 10, day: 22), frequency: 1))
+    // one day stays plain
+    let day = MacEvent(seriesID: "day", calendarID: "ical-work", title: "Holiday", start: start, end: at(2026, 10, 20, 23, 59), isAllDay: true)
+    #expect(builder().items([day]).items[0].event.repeatRule == nil)
+}
