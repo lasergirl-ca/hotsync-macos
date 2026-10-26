@@ -36,6 +36,10 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     /// nach dem HotSync, der sie gebraucht hat, wieder ausgeschaltet.
     var allowMassDelete: Bool?
 
+    /// Die ID, unter der dieser Mac im Palm als letzter PC steht (lastSyncPC):
+    /// eine je Profil, von allen Spiegeln geteilt - der Palm kennt nur eine.
+    var syncPCID: UInt32?
+
     var isDryRun: Bool { dryRun ?? false }
     var isMassDeleteAllowed: Bool { allowMassDelete ?? false }
     var isCalendarTwoWay: Bool { calendarTwoWay ?? false }

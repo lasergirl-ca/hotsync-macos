@@ -1581,6 +1581,26 @@ final class AppState {
         }
     }
 
+    /// Die PC-ID eines Profils: einmal festgelegt und gespeichert. Ein Profil
+    /// aus der Zeit, als jeder Spiegel seine eigene hatte, übernimmt die, die
+    /// der Palm gerade als letzten PC führt (sonst die erste gefundene).
+    private func syncPCID(for profile: DeviceProfile, session: Session) -> UInt32 {
+        if let id = profile.syncPCID { return id }
+        let files = ["calendar-mirror.json", "contacts-mirror.json", "tasks-mirror.json"]
+        let found = files.compactMap { file -> UInt32? in
+            guard let data = try? Data(contentsOf: mirrorURL(file, for: profile)),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let id = json["pcID"] as? UInt32 else { return nil }
+            return id
+        }
+        let id = found.contains(session.lastSyncPC) && session.lastSyncPC != 0 ? session.lastSyncPC
+            : (found.first ?? CalendarMirror.newPCID())
+        var updated = profile
+        updated.syncPCID = id
+        deviceManager.updateProfile(updated)
+        return id
+    }
+
     private func mirrorURL(_ file: String, for profile: DeviceProfile) -> URL {
         deviceManager.profileDirectory(for: profile).appendingPathComponent("Sync").appendingPathComponent(file)
     }
@@ -1607,7 +1627,8 @@ final class AppState {
     ) {
         guard let tabId = session.tabId else { return }
         let url = mirrorURL(mirrorFile, for: profile)
-        let mirror: SyncMirror<Item>
+        let pcID = syncPCID(for: profile, session: session)
+        var mirror: SyncMirror<Item>
         if FileManager.default.fileExists(atPath: url.path) {
             // ein Spiegel, der nicht lädt, ist kein neuer Spiegel: ohne ihn
             // würde alles nach Inhalt gepaart und Doppeltes angelegt
@@ -1616,8 +1637,9 @@ final class AppState {
                 return
             }
         } else {
-            mirror = SyncMirror<Item>(pcID: SyncMirror<Item>.newPCID())
+            mirror = SyncMirror<Item>(pcID: pcID)
         }
+        mirror.pcID = pcID   // alle Spiegel eines Profils unter derselben ID
         let fast = mirror.lastSync != nil && session.lastSyncPC == mirror.pcID
         tabLog(tabId, L10n.logTwoWayMode(what, fast: fast, lastSyncPC: session.lastSyncPC, mirrorEntries: mirror.entries.count))
         // Nur wenn zuletzt dieser Mac abgeglichen hat, heißt "fehlt auf dem
