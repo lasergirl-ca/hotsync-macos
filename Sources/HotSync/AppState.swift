@@ -671,6 +671,9 @@ final class AppState {
         var romResult: TabStatus.ROMDump?
         var timedOut = false
         var errorMessage: String?
+        /// der Palm antwortet nicht mehr (abgebrochen oder Verbindung weg):
+        /// nichts mehr anfangen, die Sitzung beenden
+        var palmLost = false
         var stopRequested = false
 
         init(runner: SessionRunner, purpose: Purpose, token: Int) {
@@ -864,7 +867,11 @@ final class AppState {
             // vollständig nur, wenn jede Datenbank durch ist (nicht abgebrochen)
             session.backupFinished = session.backupDone >= session.backupTotal
             if let tabId = session.tabId { tabLog(tabId, L10n.logBackupFinished(saved, unchanged, failed)) }
-            afterBackup(session)
+            if session.palmLost {
+                endLostSession(session)
+            } else {
+                afterBackup(session)
+            }
 
         case .romStarted(let file, let version, let total):
             session.romTotal = total
@@ -947,6 +954,12 @@ final class AppState {
             session.errorMessage = "\(stage): \(message)"
             DebugLog.shared.log(L10n.logSessionError(portLabel(port), stage, message), source: "Session")
             if let tabId = session.tabId { tabLog(tabId, L10n.logSessionError(portLabel(port), stage, message)) }
+            // das Werkzeug meldet so einen Palm, der nicht mehr da ist (über
+            // WLAN merkt es der Socket erst spät): nichts Weiteres versuchen
+            if message.contains("connection lost") || message.contains("does not answer") {
+                session.palmLost = true
+                if stage != "backup" { endLostSession(session) }   // die Sicherung meldet gleich ihr Ende
+            }
 
         case .dbOpened, .dbClosed, .appInfo, .appInfoWritten, .record, .recordsDone,
              .recordWritten, .recordDeleted, .flagsReset, .cleanedUp, .syncInfoWritten:
@@ -1376,6 +1389,18 @@ final class AppState {
         let directory = deviceManager.backupDirectory(for: profile)
         tabLog(tabId, L10n.logBackupStarting(directory.path))
         session.runner.send("backup \(directory.path)")
+    }
+
+    /// Der Palm ist weg: Sitzung beenden statt weiterzumachen; antwortet das
+    /// Werkzeug auf einem toten Socket nicht, wird es nach kurzer Zeit beendet.
+    private func endLostSession(_ session: Session) {
+        if let tabId = session.tabId { tabLog(tabId, L10n.logPalmLost) }
+        session.runner.send("end")
+        let port = session.runner.port
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self, weak session] in
+            guard let self, let session, self.sessions[port] === session else { return }
+            session.runner.kill()
+        }
     }
 
     /// Nach der Sicherung: die abgeglichenen Datenbanken auf dem Palm

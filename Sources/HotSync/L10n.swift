@@ -773,6 +773,9 @@ enum L10n {
         "Sicherung fertig: \(saved) neu oder geändert, \(unchanged) unverändert, \(failed) nicht lesbar",
         "Backup done: \(saved) new or changed, \(unchanged) unchanged, \(failed) unreadable"
     ) }
+    static var logPalmLost: String { s(
+        "Der Palm antwortet nicht mehr: Sitzung beendet, der Rest entfällt", "The Palm no longer answers: session ended, the rest is skipped"
+    ) }
     static var logBackupIncomplete: String { s(
         "Sicherung abgebrochen – die bis dahin geholten Datenbanken sind gesichert, die übrigen haben ihren alten Stand",
         "Backup cut short – the databases fetched so far are saved, the others keep their previous state"
