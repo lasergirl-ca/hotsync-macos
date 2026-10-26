@@ -52,3 +52,16 @@ import Testing
     #expect(DateFix.shift(other, years: -28) == other)
     #expect(DateFix.shift(db, years: 0) == db)
 }
+
+@Test func clampedBirthdayKeepsTheMirrorsValue() throws {
+    // on the Palm (start year 1972) a 1962 birthday became 1972-01-01; read back, the mirror's date stands
+    var palm = Contact(fields: [.lastName: "Leto"])
+    palm.birthday = .init(date: PalmDate(year: 1972, month: 1, day: 1), reminderAdvance: nil, advanceUnits: 0)
+    var base = SyncedContact(palm, category: "Unfiled")
+    base.birthday = PalmDate(year: 1962, month: 5, day: 6)
+    let fixed = try Contact(data: DateFix.unclamp(palm.encode(), kind: .contacts, startYear: 1972, base: base))
+    #expect(fixed.birthday?.date == PalmDate(year: 1962, month: 5, day: 6))
+    // a real 1 January 1972 birthday is left alone
+    base.birthday = PalmDate(year: 1980, month: 2, day: 3)
+    #expect(DateFix.unclamp(palm.encode(), kind: .contacts, startYear: 1972, base: base) == palm.encode())
+}

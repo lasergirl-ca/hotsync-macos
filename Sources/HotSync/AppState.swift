@@ -1179,7 +1179,7 @@ final class AppState {
                 if dry {
                     tabLog(tabId, L10n.logDryRunClock)
                 } else if session.dateFixYears > 0 {
-                    session.runner.send("settime \(DateFix.offsetDays(startYear: 1904 + session.dateFixYears))")
+                    session.runner.send("settime \(session.dateFixYears)")   // Wanduhrzeit, Jahr zurück
                 } else {
                     session.runner.send("settime")
                 }
@@ -1494,9 +1494,15 @@ final class AppState {
         // es wird immer alles gelesen; mit DateFix in echten Jahren
         let kind = DateFix.Kind(creator: session.twoWayCurrent == ContactsBuilder.databaseName ? "PAdd"
                                 : session.twoWayCurrent == TasksBuilder.databaseName ? "PTod" : "PDat")!
+        let bases = Dictionary(mirror.entries.map { ($0.palmID, $0.base) }, uniquingKeysWith: { a, _ in a })
         let palm = PalmSnapshot.all(session.calendarRecords.map { record in
             var r = record
             r.data = DateFix.shift(record.data, kind: kind, years: session.dateFixYears)
+            if session.dateFixYears > 0, let base = bases[record.id] {
+                // ein Datum vor DateFix' Fenster hat der Palm auf dessen ersten
+                // Tag gesetzt: das ist keine Änderung, der Spiegel behält es
+                r.data = DateFix.unclamp(r.data, kind: kind, startYear: 1904 + session.dateFixYears, base: base)
+            }
             return r
         })
         do {

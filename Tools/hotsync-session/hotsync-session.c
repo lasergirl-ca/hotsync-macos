@@ -1136,13 +1136,22 @@ static void write_sync_info(int sd, const char *args)
 	emit_end();
 }
 
-/* "settime [TAGE]": die Uhr des Palms auf die Ortszeit des Macs stellen,
+/* "settime [JAHRE]": die Uhr des Palms auf die Ortszeit des Macs stellen,
  * wie es der HotSync-Manager tat; libpisock rechnet time_t in die lokale
- * Zeit um. TAGE: um so viele Tage zurück, für einen Palm mit DateFix. */
-static void set_time(int sd, long days_back)
+ * Zeit um. JAHRE: um so viele Jahre zurück, für einen Palm mit DateFix -
+ * als Wanduhrzeit: derselbe Tag und dieselbe Uhrzeit wie jetzt, nur das
+ * Jahr anders. (Den Zeitpunkt selbst zurückzurechnen gäbe eine andere
+ * Stunde, wenn damals andere Sommerzeitregeln galten.) */
+static void set_time(int sd, long years_back)
 {
-	time_t now = time(NULL) - (time_t)days_back * 86400;
+	time_t now = time(NULL);
 
+	if (years_back > 0) {
+		struct tm local = *localtime(&now);
+		local.tm_year -= (int)years_back;
+		local.tm_isdst = -1;
+		now = mktime(&local);
+	}
 	if (dlp_SetSysDateTime(sd, now) < 0) {
 		emit_dlp_error(sd, "settime", "cannot set the clock");
 		return;

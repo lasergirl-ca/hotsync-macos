@@ -76,6 +76,19 @@ public enum DateFix {
         }
     }
 
+    /// A date DateFix could not represent (before its start year) is stored
+    /// as the window's first day. Read back, that is no edit: where the
+    /// mirror knows the real date and it lies before the window, the record
+    /// gets it back, so the clamp never travels to the Mac. Contacts
+    /// birthdays are the only such dates in practice.
+    public static func unclamp<Item: SyncedItem>(_ data: Data, kind: Kind, startYear: Int, base: Item) -> Data {
+        guard kind == .contacts, let base = base as? SyncedContact, let real = base.birthday, real.year < startYear,
+              var contact = try? Contact(data: data), contact.birthday?.date == PalmDate(year: startYear, month: 1, day: 1)
+        else { return data }
+        contact.birthday?.date = real
+        return contact.encode()
+    }
+
     /// Every record of a PIM database shifted; other databases untouched.
     public static func shift(_ database: PalmDatabase, years: Int) -> PalmDatabase {
         guard years != 0, let kind = Kind(creator: database.creator) else { return database }
