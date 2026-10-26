@@ -184,8 +184,12 @@ public struct CalendarBuilder {
 
             var record = convert(master)
             record.repeatRule = palmRule
+            // the Mac's fetch ends before windowEnd (an exclusive end), so the
+            // last day generated must too, or that day is always "missing"
+            // and the series grows an exception that moves with every sync
+            let lastFetchedDay = calendar.date(byAdding: .second, value: -1, to: options.windowEnd) ?? options.windowEnd
             let generated = PalmRecurrence.occurrences(of: palmRule, startingOn: record.date,
-                                                       through: PalmDate(options.windowEnd, in: calendar))
+                                                       through: PalmDate(lastFetchedDay, in: calendar))
             let present = Set(regular.map { PalmDate($0.occurrenceDate ?? $0.start, in: calendar) })
             var exceptions = generated.filter { !present.contains($0) }
             for occurrence in detached {

@@ -261,3 +261,24 @@ private func decoded(_ db: PalmDatabase) -> [CalendarEvent] {
     #expect(info.categories.lastUniqueID == 15 && info.categories.ids == Array(0...15))
     #expect(try! PalmDatabase(data: data) == db)
 }
+
+@Test func noExceptionOnTheWindowsLastDay() {
+    // a daily series fetched up to (not including) windowEnd: the window's
+    // last day is not an occurrence the Mac returned, and must not become
+    // an exception that changes with every sync
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = vancouver
+    let windowEnd = at(2027, 10, 19)
+    let rule = MacRecurrence(frequency: .daily)
+    var occurrences: [MacEvent] = []
+    var day = at(2026, 10, 20, 9, 0)
+    while day < windowEnd {
+        occurrences.append(MacEvent(seriesID: "daily", calendarID: "ical-work", title: "Daily", start: day,
+                                    end: day.addingTimeInterval(1800), isAllDay: false, recurrence: rule,
+                                    occurrenceDate: day))
+        day = cal.date(byAdding: .day, value: 1, to: day)!
+    }
+    let (items, report) = builder().items(occurrences)
+    #expect(items.count == 1 && report.exceptions == 0)
+    #expect(items[0].event.exceptions.isEmpty)
+}
