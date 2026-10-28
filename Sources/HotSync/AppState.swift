@@ -2177,7 +2177,11 @@ final class AppState {
     private func finish(_ session: Session, exit: SessionRunner.Exit) {
         session.watchdog?.cancel()
         session.watchdog = nil
-        if session.usedMassDelete, let profileId = session.profileId { setAllowMassDelete(false, for: profileId) }
+        // "Viele Änderungen zulassen" gilt für einen HotSync, gebraucht oder nicht
+        if session.admitted, let profileId = session.profileId, deviceManager.profile(profileId)?.isMassDeleteAllowed == true {
+            setAllowMassDelete(false, for: profileId)
+            if let tabId = session.tabId { tabLog(tabId, L10n.logMassAllowReset) }
+        }
         let port = session.runner.port
         if sessions[port] === session {
             sessions[port] = nil

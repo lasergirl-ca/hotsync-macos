@@ -581,6 +581,9 @@ enum L10n {
         "Ein Abgleich, der zehn oder mehr vorhandene Einträge (oder ein Fünftel) auf einer Seite löschen oder ändern würde, wird sonst verweigert – meist steckt eine leere Quelle, ein zurückgesetzter Palm oder eine falsche Zuordnung dahinter, keine Absicht. Neue Einträge zählen nicht. Gilt für einen HotSync und schaltet sich danach aus.",
         "A sync that would delete or change ten or more existing items (or a fifth) on one side is otherwise refused – usually that is an empty source, a reset Palm or a wrong mapping, not intent. New items do not count. Applies to one HotSync and switches itself off afterwards."
     ) }
+    static var logMassAllowReset: String { s(
+        "„Viele Änderungen zulassen“ ist wieder aus", "“Allow many changes” is off again"
+    ) }
     static func logTwoWayTruncated(_ what: String, _ got: Int, _ expected: Int) -> String { s(
         "\(what): nur \(got) von \(expected) Datensätzen gelesen – Abgleich ausgelassen, nichts geändert",
         "\(what): only \(got) of \(expected) records read – sync skipped, nothing changed"
