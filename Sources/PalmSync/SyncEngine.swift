@@ -179,9 +179,20 @@ public struct SyncPlan<Item: SyncedItem>: Equatable, Sendable {
         palmWrites.isEmpty && palmDeletes.isEmpty && macCreates.isEmpty && macUpdates.isEmpty && macDeletes.isEmpty
     }
 
-    /// Deletions large enough to be a mistake rather than housekeeping: ten
-    /// or more on one side, or three or more that are a fifth of what the
-    /// mirror holds. The caller refuses to apply such a plan unless told to.
+    /// Deletions or updates large enough to be a mistake rather than
+    /// housekeeping: ten or more of one kind on one side, or three or more
+    /// that are a fifth of what the mirror holds. An empty source, a reset
+    /// Palm, a wrong calendar mapping or a shifted clock look like that; a
+    /// user's edits rarely do. The caller refuses such a plan unless told to.
+    public func massChange(mirrorEntries: Int) -> SyncMassChange? {
+        func mass(_ n: Int) -> Bool { n >= 10 || (n >= 3 && n * 5 >= mirrorEntries) }
+        let change = SyncMassChange(macDeletes: macDeletes.count, palmDeletes: palmDeletes.count,
+                                macUpdates: macUpdates.count, palmUpdates: palmWrites.filter { $0.id != nil }.count)
+        let flagged = [change.macDeletes, change.palmDeletes, change.macUpdates, change.palmUpdates].contains(where: mass)
+        return flagged ? change : nil
+    }
+
+    /// The deletions alone (see `massChange`).
     public func massDeletion(mirrorEntries: Int) -> (mac: Int, palm: Int)? {
         func mass(_ n: Int) -> Bool { n >= 10 || (n >= 3 && n * 5 >= mirrorEntries) }
         return mass(macDeletes.count) || mass(palmDeletes.count) ? (macDeletes.count, palmDeletes.count) : nil
@@ -245,6 +256,22 @@ public struct SyncPlan<Item: SyncedItem>: Equatable, Sendable {
             PalmDatabase.Record(attributes: $0.attributes & PalmDatabase.Record.secret, category: $0.category, uniqueID: $0.id, data: $0.data)
         }
         return (records.map(\.record) + kept, palmIDs, categories, nextID)
+    }
+}
+
+/// What a plan does to items both sides already had: deletions and updates
+/// on each side (creates and aged-out records are not counted).
+public struct SyncMassChange: Equatable, Sendable {
+    public var macDeletes: Int
+    public var palmDeletes: Int
+    public var macUpdates: Int
+    public var palmUpdates: Int
+
+    public init(macDeletes: Int, palmDeletes: Int, macUpdates: Int, palmUpdates: Int) {
+        self.macDeletes = macDeletes
+        self.palmDeletes = palmDeletes
+        self.macUpdates = macUpdates
+        self.palmUpdates = palmUpdates
     }
 }
 

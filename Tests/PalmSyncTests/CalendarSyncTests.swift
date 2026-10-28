@@ -447,3 +447,18 @@ private func syncedMirror() -> CalendarMirror {
     let kept = try both.plan(palm: .modified([palmEdit]), palmCategories: palmCategories, mac: mac, mirror: syncedMirror())
     #expect(kept.conflicts[0].resolution == .keepBoth && kept.macCreates.count == 1)
 }
+
+@Test func massChangeCountsUpdatesOnBothSides() {
+    var plan = CalendarSyncPlan()
+    let item = SyncedEvent(date: standupDate, title: "x", category: "Personal")
+    for i in 0..<10 { plan.macUpdates.append(.init(key: MacKey(seriesID: "\(i)"), item: item, entry: i)) }
+    #expect(plan.massChange(mirrorEntries: 100)?.macUpdates == 10)      // ten rewrites on the Mac: a lot
+    var palmSide = CalendarSyncPlan()
+    for i in 0..<3 { palmSide.palmWrites.append(.init(id: UInt32(i + 1), category: 0, record: Data(), entry: i)) }
+    palmSide.palmWrites.append(.init(id: nil, category: 0, record: Data(), entry: 3))   // a create does not count
+    #expect(palmSide.massChange(mirrorEntries: 12)?.palmUpdates == 3)    // 3 of 12 existing: a quarter
+    #expect(palmSide.massChange(mirrorEntries: 40) == nil)
+    var creates = CalendarSyncPlan()
+    for i in 0..<50 { creates.palmWrites.append(.init(id: nil, category: 0, record: Data(), entry: i)) }
+    #expect(creates.massChange(mirrorEntries: 0) == nil)                 // a first sync creates everything: fine
+}

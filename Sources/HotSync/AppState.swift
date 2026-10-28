@@ -1767,14 +1767,15 @@ final class AppState {
     ) {
         guard let tabId = session.tabId else { return }
         do {
-            // Viele Löschungen auf einmal sind eher ein Fehler (leere Quelle,
-            // falsche Datenbank) als Absicht: nur mit ausdrücklicher Erlaubnis
-            if let mass = plan.massDeletion(mirrorEntries: mirror.entries.count) {
+            // Viele Löschungen oder Änderungen auf einmal sind eher ein Fehler
+            // (leere Quelle, falsche Zuordnung, verstellte Uhr) als Absicht:
+            // nur mit ausdrücklicher Erlaubnis
+            if let mass = plan.massChange(mirrorEntries: mirror.entries.count) {
                 guard profile.isMassDeleteAllowed else {
-                    tabLog(tabId, L10n.logTwoWayMassRefused(what, mac: mass.mac, palm: mass.palm, mirror: mirror.entries.count))
+                    tabLog(tabId, L10n.logTwoWayMassRefused(what, mass, mirror: mirror.entries.count))
                     return
                 }
-                tabLog(tabId, L10n.logTwoWayMassAllowed(what, mac: mass.mac, palm: mass.palm))
+                tabLog(tabId, L10n.logTwoWayMassAllowed(what, mass))
                 session.usedMassDelete = true   // gilt für diesen einen HotSync, alle Datenbanken
             }
 
