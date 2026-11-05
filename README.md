@@ -8,7 +8,7 @@ Background and pilot-link build for Apple Silicon: [palm2000.com](https://palm20
 ## Download
 
 Ready-to-use builds for **macOS 14 or newer** are on the
-[Releases page](https://github.com/User7142/hotsync-macos/releases/latest). Each release
+[Releases page](https://github.com/lasergirl-ca/hotsync-macos/releases/latest). Each release
 carries a disk image, `HotSync-<version>-macos-<arch>.dmg`, and the same app as a zip. The
 sync tool and all the libraries it needs are included &ndash; no Homebrew, no pilot-link
 installation required. `<arch>` says which Macs the build runs on: `arm64` for Apple Silicon,
