@@ -2,112 +2,108 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key>
-    <string>HotSync</string>
-    <key>CFBundleDisplayName</key>
-    <string>HotSync</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.palm.hotsync.macos</string>
-    <key>CFBundleVersion</key>
-    <string>1.3.0</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.3.0</string>
-    <key>CFBundleExecutable</key>
-    <string>HotSync</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>LSUIElement</key>
-    <false/>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>NSPrincipalClass</key>
-    <string>NSApplication</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <!-- PIM sync: the Mac's calendars go onto the Palm -->
-    <key>NSCalendarsFullAccessUsageDescription</key>
-    <string>HotSync reads the calendars you choose to put them on your Palm.</string>
-    <key>NSRemindersFullAccessUsageDescription</key>
-    <string>HotSync reads the Reminders lists you choose to put them on your Palm as tasks.</string>
-    <key>NSContactsUsageDescription</key>
-    <string>HotSync reads the contacts of the accounts you choose to put them on your Palm.</string>
-    <key>CFBundleDocumentTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleTypeName</key>
-            <string>Palm OS Application</string>
-            <key>CFBundleTypeRole</key>
-            <string>Viewer</string>
-            <key>LSHandlerRank</key>
-            <string>Default</string>
-            <key>LSItemContentTypes</key>
-            <array>
-                <string>com.palm.prc</string>
-            </array>
-            <key>CFBundleTypeExtensions</key>
-            <array>
-                <string>prc</string>
-            </array>
-        </dict>
-        <dict>
-            <key>CFBundleTypeName</key>
-            <string>Palm OS Database</string>
-            <key>CFBundleTypeRole</key>
-            <string>Viewer</string>
-            <key>LSHandlerRank</key>
-            <string>Default</string>
-            <key>LSItemContentTypes</key>
-            <array>
-                <string>com.palm.pdb</string>
-                <!-- LibreOffice imports .pdb as AportisDoc (a Palm database
-                     too); with LibreOffice installed, .pdb files get this
-                     type instead of com.palm.pdb -->
-                <string>org.libreoffice.pdb-document</string>
-            </array>
-            <key>CFBundleTypeExtensions</key>
-            <array>
-                <string>pdb</string>
-            </array>
-        </dict>
-    </array>
-    <key>UTImportedTypeDeclarations</key>
-    <array>
-        <dict>
-            <key>UTTypeIdentifier</key>
-            <string>com.palm.prc</string>
-            <key>UTTypeDescription</key>
-            <string>Palm OS Application</string>
-            <key>UTTypeConformsTo</key>
-            <array>
-                <string>public.data</string>
-            </array>
-            <key>UTTypeTagSpecification</key>
-            <dict>
-                <key>public.filename-extension</key>
-                <array>
-                    <string>prc</string>
-                </array>
-            </dict>
-        </dict>
-        <dict>
-            <key>UTTypeIdentifier</key>
-            <string>com.palm.pdb</string>
-            <key>UTTypeDescription</key>
-            <string>Palm OS Database</string>
-            <key>UTTypeConformsTo</key>
-            <array>
-                <string>public.data</string>
-            </array>
-            <key>UTTypeTagSpecification</key>
-            <dict>
-                <key>public.filename-extension</key>
-                <array>
-                    <string>pdb</string>
-                </array>
-            </dict>
-        </dict>
-    </array>
+	<key>CFBundleDisplayName</key>
+	<string>HotSync</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>prc</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>Palm OS Application</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.palm.prc</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>pdb</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>Palm OS Database</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.palm.pdb</string>
+				<string>org.libreoffice.pdb-document</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleExecutable</key>
+	<string>HotSync</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.palm.hotsync.macos</string>
+	<key>CFBundleName</key>
+	<string>HotSync</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.3.1</string>
+	<key>CFBundleVersion</key>
+	<string>1.3.1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<false/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>HotSync reads the calendars you choose to put them on your Palm.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>HotSync reads the contacts of the accounts you choose to put them on your Palm.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>HotSync reads the Reminders lists you choose to put them on your Palm as tasks.</string>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Palm OS Application</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.palm.prc</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>prc</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Palm OS Database</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.palm.pdb</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>pdb</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
 </dict>
 </plist>
