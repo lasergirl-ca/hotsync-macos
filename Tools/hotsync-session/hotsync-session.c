@@ -46,6 +46,9 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -56,11 +59,19 @@
 #include <time.h>
 #include <utime.h>
 #include <unistd.h>
+#include <sys/socket.h>
 
 #include "pi-dlp.h"
 #include "pi-file.h"
 #include "pi-socket.h"
+#include "pi-source.h"
+#include "pi-net.h"
 #include "pi-syspkt.h"
+
+/* libpisock exports it (pi_bind() and pi_accept() call it) but no header
+ * declares it: builds the protocol stack of a socket whose descriptor was
+ * set by hand, as pi_socket_setsd() needs */
+extern int pi_socket_init(pi_socket_t *ps);
 
 /* ---- JSON-Ausgabe -------------------------------------------------------- */
 
@@ -632,6 +643,285 @@ static void get_rom(int sd, const char *dir)
 	emit_str("file", name, 0);
 	emit_int("bytes", (long)rom_length);
 	emit_end();
+}
+
+/* ---- Relay: the session goes to a desktop on the network ---------------- */
+
+/* "relay HOST[:PORT]": the Palm on the cradle is handed to a network
+ * HotSync server (Cradle's airlock, or any NetSync desktop), the way
+ * Palm's LANSync did it. The server runs the session and its conduits;
+ * this tool only moves DLP packets: one request from the server to the
+ * Palm, the Palm's reply back, until the server ends the session
+ * (dlp_EndOfSync) or either side hangs up. Nothing in the traffic is
+ * interpreted beyond what framing needs. Modelled on pilot-link's
+ * pilot-nredir; the socket is adopted by hand (as Cradle's worker does
+ * for "--fd") because pi_connect() knows no port but 14238.
+ *
+ * While the server thinks (approval, conduits), the Palm hears a tickle
+ * every few seconds, as it would from a slow desktop; after
+ * RELAY_IDLE_LIMIT seconds without a request the relay gives up. */
+
+#define RELAY_TICKLE_S     5
+#define RELAY_IDLE_LIMIT_S 600
+#define RELAY_REPORT_EVERY 25
+
+/* set once a relayed session is over: the Palm has already had its
+ * EndOfSync from the server (or the link is gone) - main() sends none */
+static int session_relayed = 0;
+
+/* Opens the TCP connection: "host", "host:port" or "[v6]:port". */
+static int relay_connect(const char *target)
+{
+	char host[256], service[16] = "14238";
+	const char *colon, *end;
+	struct addrinfo hints, *res, *ai;
+	int fd = -1, err;
+	size_t len;
+
+	if (target[0] == '[' && (end = strchr(target, ']')) != NULL) {
+		len = (size_t)(end - target - 1);
+		colon = end[1] == ':' ? end + 1 : NULL;
+		target++;
+	} else {
+		colon = strrchr(target, ':');
+		len = colon ? (size_t)(colon - target) : strlen(target);
+	}
+	if (len == 0 || len >= sizeof(host)) {
+		emit_error("relay", "usage: relay HOST[:PORT]");
+		return -1;
+	}
+	memcpy(host, target, len);
+	host[len] = '\0';
+	if (colon != NULL) {
+		if (colon[1] == '\0' || strlen(colon + 1) >= sizeof(service)) {
+			emit_error("relay", "usage: relay HOST[:PORT]");
+			return -1;
+		}
+		strcpy(service, colon + 1);
+	}
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	err = getaddrinfo(host, service, &hints, &res);
+	if (err != 0) {
+		emit_error("relay", "cannot resolve %s: %s", host, gai_strerror(err));
+		return -1;
+	}
+	for (ai = res; ai != NULL; ai = ai->ai_next) {
+		fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+		if (fd < 0)
+			continue;
+		if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0)
+			break;
+		close(fd);
+		fd = -1;
+	}
+	freeaddrinfo(res);
+	if (fd < 0) {
+		emit_error("relay", "cannot connect to %s:%s (%s)", host, service, strerror(errno));
+		return -1;
+	}
+	{
+		int one = 1;
+		setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+		/* a server that is gone shows as an error, not as SIGPIPE */
+		setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+	}
+	return fd;
+}
+
+/* Turns the connected descriptor into a libpisock NET socket on the
+ * Palm's side of the protocol: pi_bind() builds the device and protocol
+ * stack (its ephemeral listener is replaced by the connection), then the
+ * NetSync handshake is sent as a Palm sends it, and the socket is marked
+ * as connected by initiating - so every request's transaction ID is
+ * echoed in the reply, as the server expects from a Palm. */
+static int relay_adopt(int fd)
+{
+	int sd, split = 0, chunksize = 0, honor = 0;
+	size_t len;
+	pi_socket_t *ps;
+
+	sd = pi_socket(PI_AF_PILOT, PI_SOCK_STREAM, PI_PF_NET);
+	if (sd < 0) {
+		emit_error("relay", "unable to create the network socket");
+		close(fd);
+		return -1;
+	}
+	if (pi_bind(sd, "net:any:0") < 0) {
+		emit_error("relay", "unable to set up the network device");
+		pi_close(sd);
+		close(fd);
+		return -1;
+	}
+	ps = find_pi_socket(sd);
+	if (ps == NULL) {
+		emit_error("relay", "socket vanished");
+		pi_close(sd);
+		close(fd);
+		return -1;
+	}
+	/* dup2(fd, ps->sd): the listener goes away, fd is closed afterwards */
+	if (pi_socket_setsd(ps, fd) < 0) {
+		emit_error("relay", "cannot adopt the connection (%s)", strerror(errno));
+		pi_close(sd);
+		return -1;
+	}
+	ps->cmd = PI_CMD_NET;
+	pi_socket_init(ps);
+
+	/* as pi_inet_accept(): never split writes, on both protocol stacks */
+	len = sizeof(split);
+	pi_setsockopt(ps->sd, PI_LEVEL_NET, PI_NET_SPLIT_WRITES, &split, &len);
+	len = sizeof(chunksize);
+	pi_setsockopt(ps->sd, PI_LEVEL_NET, PI_NET_WRITE_CHUNKSIZE, &chunksize, &len);
+	ps->command ^= 1;
+	len = sizeof(split);
+	pi_setsockopt(ps->sd, PI_LEVEL_NET, PI_NET_SPLIT_WRITES, &split, &len);
+	len = sizeof(chunksize);
+	pi_setsockopt(ps->sd, PI_LEVEL_NET, PI_NET_WRITE_CHUNKSIZE, &chunksize, &len);
+	ps->command ^= 1;
+
+	/* the handshake runs as pi_inet_connect() would run it */
+	ps->state = PI_SOCK_CONN_INIT;
+	ps->command = 0;
+	if (net_tx_handshake(ps) < 0) {
+		emit_error("relay", "NetSync handshake with the server failed (%d)", pi_error(sd));
+		pi_close(sd);
+		return -1;
+	}
+	/* no 30-second limit on waiting for the next request: the relay
+	 * waits itself (poll), tickling the Palm meanwhile */
+	len = sizeof(honor);
+	pi_setsockopt(sd, PI_LEVEL_SOCK, PI_SOCK_HONOR_RX_TIMEOUT, &honor, &len);
+	return sd;
+}
+
+/* Waits for the server's next request, keeping the Palm awake. Returns
+ * 1 when something is there to read, 0 when the Palm went away, -1 after
+ * RELAY_IDLE_LIMIT_S without a word from the server. */
+static int relay_wait(int sd, int netfd)
+{
+	struct pollfd pfd = { .fd = netfd, .events = POLLIN };
+	int waited = 0;
+
+	for (;;) {
+		int ready = poll(&pfd, 1, RELAY_TICKLE_S * 1000);
+		if (ready > 0)
+			return 1;
+		if (ready < 0 && errno != EINTR)
+			return 1;	/* let pi_read report what is wrong */
+		waited += RELAY_TICKLE_S;
+		if (waited >= RELAY_IDLE_LIMIT_S)
+			return -1;
+		if (pi_tickle(sd) < 0 || !pi_socket_connected(sd))
+			return 0;
+	}
+}
+
+static void emit_relayed(const char *event, long packets, long bytes)
+{
+	emit_begin(event);
+	emit_int("packets", packets);
+	emit_int("bytes", bytes);
+	emit_end();
+}
+
+/* Returns 1 when the Palm's session was consumed by the relay (over, one
+ * way or another), 0 when nothing reached the Palm and the session can
+ * go on with other commands. */
+static int relay_session(int sd, const char *target)
+{
+	int fd, netsd, netfd, ended = 0, lost = 0;
+	long packets = 0, bytes = 0;
+	pi_buffer_t *buf;
+	pi_socket_t *ps;
+
+	fd = relay_connect(target);
+	if (fd < 0)
+		return 0;
+	netsd = relay_adopt(fd);
+	if (netsd < 0)
+		return 0;
+	ps = find_pi_socket(netsd);
+	netfd = ps != NULL ? ps->sd : -1;
+
+	emit_begin("relayStarted");
+	emit_str("target", target, 0);
+	emit_end();
+
+	buf = pi_buffer_new(0xFFFF);
+	for (;;) {
+		ssize_t len;
+		int wait = relay_wait(sd, netfd);
+
+		if (wait == 0) {
+			emit_error("relay", "connection lost while waiting for the server");
+			lost = 1;
+			break;
+		}
+		if (wait < 0) {
+			emit_error("relay", "no request from the server for %d seconds", RELAY_IDLE_LIMIT_S);
+			break;
+		}
+
+		/* one DLP request from the server ... */
+		buf->used = 0;
+		len = pi_read(netsd, buf, 0xFFFF);
+		if (len <= 0) {
+			/* the server hung up: after EndOfSync that is how it ends */
+			if (!ended)
+				emit_error("relay", "the server hung up (%d)", (int)len);
+			break;
+		}
+		if (buf->used > 0 && buf->data[0] == dlpFuncEndOfSync)
+			ended = 1;
+		/* ... to the Palm, and its reply back */
+		if (pi_write(sd, buf->data, buf->used) < 0) {
+			emit_error("relay", "connection lost while writing to the Palm");
+			lost = 1;
+			break;
+		}
+		bytes += (long)buf->used;
+		buf->used = 0;
+		len = pi_read(sd, buf, 0xFFFF);
+		if (len < 0) {
+			emit_error("relay", "connection lost while reading from the Palm");
+			lost = 1;
+			break;
+		}
+		if (pi_write(netsd, buf->data, buf->used) < 0) {
+			emit_error("relay", "the server hung up while receiving a reply");
+			break;
+		}
+		bytes += (long)buf->used;
+		packets++;
+		if (packets % RELAY_REPORT_EVERY == 0)
+			emit_relayed("relayed", packets, bytes);
+		if (ended)
+			break;	/* the Palm has answered EndOfSync: the session is over */
+	}
+	pi_buffer_free(buf);
+
+	/* The session is over on both sides: pi_close() would otherwise send
+	 * its own EndOfSync to each of them (as pilot-nredir ends, too) */
+	{
+		int state = PI_SOCK_CONN_END;
+		size_t size = sizeof(state);
+		pi_setsockopt(netsd, PI_LEVEL_SOCK, PI_SOCK_STATE, &state, &size);
+		pi_setsockopt(sd, PI_LEVEL_SOCK, PI_SOCK_STATE, &state, &size);
+	}
+	pi_close(netsd);
+
+	emit_begin("relayFinished");
+	emit_int("packets", packets);
+	emit_int("bytes", bytes);
+	emit_int("ended", ended);
+	emit_end();
+	(void)lost;
+	session_relayed = 1;
+	return 1;
 }
 
 /* ---- Sitzung ------------------------------------------------------------ */
@@ -1317,6 +1607,9 @@ static void run_commands(int sd)
 			/* Der Palm zeigt jeden Eintrag als eigene Zeile im HotSync-Log */
 			strncat(entry, "\n", sizeof(entry) - strlen(entry) - 1);
 			dlp_AddSyncLogEntry(sd, entry);
+		} else if (strncmp(line, "relay ", 6) == 0) {
+			if (relay_session(sd, line + 6))
+				break;	/* the server has ended the session */
 		} else if (strcmp(line, "end") == 0) {
 			break;
 		} else if (line[0] != '\0') {
@@ -1367,7 +1660,8 @@ int main(int argc, char **argv)
 
 	if (open_db >= 0)
 		dlp_CloseDB(sd, open_db);
-	dlp_EndOfSync(sd, dlpEndCodeNormal);
+	if (!session_relayed)
+		dlp_EndOfSync(sd, dlpEndCodeNormal);
 	pi_close(sd);
 
 	emit_begin("finished");

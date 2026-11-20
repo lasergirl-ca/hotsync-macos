@@ -1,0 +1,18 @@
+diff --git a/libpisock/inet.c b/libpisock/inet.c
+index a6d4e6e6..47669394 100644
+--- a/libpisock/inet.c
++++ b/libpisock/inet.c
+@@ -529,6 +529,13 @@ pi_inet_read(pi_socket_t *ps, pi_buffer_t *msg, size_t len, int flags)
+ 			}
+ 			return pi_set_error(ps->sd, PI_ERR_SOCK_IO);
+ 		}
++		if (r == 0 && len > 0) {
++			/* select() said readable and recv() returned nothing: the
++			 * peer closed the connection. Callers loop on 0 ("no data
++			 * yet"), so report the disconnect instead of spinning. */
++			ps->state = PI_SOCK_CONN_BREAK;
++			return pi_set_error(ps->sd, PI_ERR_SOCK_DISCONNECTED);
++		}
+ 
+ 		data->rx_bytes += r;
+ 		msg->used += r;
