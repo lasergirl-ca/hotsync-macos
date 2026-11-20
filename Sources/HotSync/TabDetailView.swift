@@ -784,6 +784,18 @@ struct DryRunSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if appState.deviceManager.profile(profileId)?.isCradleSyncSeen == true {
+                    Toggle(isOn: Binding(
+                        get: { appState.deviceManager.profile(profileId)?.isCradleSharedSync ?? false },
+                        set: { appState.setCradleSharedSync($0, for: profileId) }
+                    )) {
+                        Text(L10n.cradleToggle)
+                    }
+                    Text(L10n.cradleHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(4)

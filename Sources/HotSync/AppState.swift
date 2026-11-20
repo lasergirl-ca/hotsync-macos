@@ -663,6 +663,8 @@ final class AppState {
         var twoWayCurrent: String?
         /// aus dem syncInfo-Ereignis: welcher PC zuletzt abgeglichen hat
         var lastSyncPC: UInt32 = 0
+        /// CradleSync ist auf dem Palm: ein Cradle-Server gleicht ihn auch ab
+        var cradleSync = false
         /// DateFix auf dem Palm: um so viele Jahre sind seine Daten und
         /// seine Uhr verschoben (0: kein DateFix)
         var dateFixYears = 0
@@ -805,9 +807,11 @@ final class AppState {
         case .timeout:
             session.timedOut = true
 
-        case .connected(let user, let romVersion, let dateFixStartYear):
+        case .connected(let user, let romVersion, let dateFixStartYear, let lastSyncPC, let cradleSync):
             session.connected = true
             session.romVersion = romVersion
+            session.lastSyncPC = lastSyncPC   // syncInfo kommt erst danach, admit braucht ihn jetzt
+            session.cradleSync = cradleSync
             // nur was DateFix selbst zulässt: 1904 … 1972 in Viererschritten
             if let y = dateFixStartYear, (1904...1972).contains(y), (y - 1904) % 4 == 0 {
                 session.dateFixYears = y - 1904
@@ -946,6 +950,9 @@ final class AppState {
             session.backupDone += 1
             session.backupFailed += 1
             if let tabId = session.tabId { tabLog(tabId, L10n.logBackupFailed(file, palmOSError)) }
+
+        case .backupSkipped(let file, _):
+            if let tabId = session.tabId { tabLog(tabId, L10n.logBackupSkipped(file)) }
 
         case .backupFinished(let saved, let unchanged, let failed):
             // vollständig nur, wenn jede Datenbank durch ist (nicht abgebrochen)
@@ -1086,6 +1093,12 @@ final class AppState {
         profile.contactSync = settings
         deviceManager.updateProfile(profile)
         refreshContactPreview(for: profileId)
+    }
+
+    func setCradleSharedSync(_ on: Bool, for profileId: UUID) {
+        guard var profile = deviceManager.profile(profileId) else { return }
+        profile.cradleSharedSync = on
+        deviceManager.updateProfile(profile)
     }
 
     func setAllowMassDelete(_ on: Bool, for profileId: UUID) {
@@ -1297,6 +1310,21 @@ final class AppState {
         if mode.syncs, let profile = deviceManager.profile(profileId), palmOS.hasGarnetPIM {
             let dry = profile.isDryRun
             if dry { tabLog(tabId, L10n.logDryRun) }
+            // CradleSync auf dem Palm: ein Cradle-Server gleicht Kalender,
+            // Kontakte und Aufgaben auch ab. Hat zuletzt er abgeglichen,
+            // bleiben die drei hier aus (zwei Rechner am selben Palm holen
+            // sich gegenseitig Gelöschtes zurück), es sei denn, das Profil
+            // will beide. Sicherung, Installation, Uhr und Zeitzonen laufen.
+            var pimSync = true
+            if session.cradleSync {
+                let ours = profile.syncPCID ?? 0
+                if session.lastSyncPC != 0, session.lastSyncPC != ours, !profile.isCradleSharedSync {
+                    tabLog(tabId, L10n.logCradleSkipped(session.lastSyncPC))
+                    pimSync = false
+                } else {
+                    tabLog(tabId, L10n.logCradlePresent)
+                }
+            }
             // Uhr vom Mac jetzt, Zeitzonen nach der Sicherung
             if session.dateFixYears > 0 { tabLog(tabId, L10n.logDateFix(1904 + session.dateFixYears)) }
             if profile.isClockSyncOn {
@@ -1323,7 +1351,7 @@ final class AppState {
             if profile.isZoneSyncOn { session.fixDatabases = ["locLTimeZoneDB", "locLDefLocationDB", "locLCusLocationDB"] }
             // Erst sichern, dann ersetzen: ohne Sicherung dieses Palms gehen
             // sein eigener Kalender und seine Kontakte nicht verloren
-            if let settings = profile.calendarSync, settings.enabled {
+            if pimSync, let settings = profile.calendarSync, settings.enabled {
                 if profile.lastBackupAt == nil {
                     tabLog(tabId, L10n.logCalendarNeedsBackup)   // ein- wie beidseitig: erst sichern
                 } else if profile.isCalendarTwoWay {
@@ -1335,7 +1363,7 @@ final class AppState {
                     if !dry { session.checkDatabases.append(CalendarBuilder.databaseName) }
                 }
             }
-            if let settings = profile.contactSync, settings.enabled {
+            if pimSync, let settings = profile.contactSync, settings.enabled {
                 if profile.lastBackupAt == nil {
                     tabLog(tabId, L10n.logContactsNeedBackup)
                 } else if profile.isContactTwoWay {
@@ -1346,7 +1374,7 @@ final class AppState {
                     if !dry { session.checkDatabases.append(ContactsBuilder.databaseName) }
                 }
             }
-            if let settings = profile.taskSync, settings.enabled {
+            if pimSync, let settings = profile.taskSync, settings.enabled {
                 if profile.lastBackupAt == nil {
                     tabLog(tabId, L10n.logTasksNeedBackup)
                 } else if profile.isTaskTwoWay {
@@ -1377,6 +1405,7 @@ final class AppState {
         session.files = files
         queue.beginInstall(files, session: session.token)
         deviceManager.updateRomVersion(session.romVersion, for: profileId)
+        deviceManager.updateCradleSyncSeen(session.cradleSync, for: profileId)
         if restoreRequests.remove(profileId) != nil {
             session.restoreFiles = backupFiles(for: profileId)
             // Nach dem Zurückspielen hat der Palm den Stand der Sicherung,

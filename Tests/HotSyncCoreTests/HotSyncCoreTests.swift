@@ -190,6 +190,10 @@ private func imageWithVersion(_ version: String?) -> Data {
             == .connected(PalmUser(name: "Müller €", userId: 7), romVersion: 0))
     #expect(SessionEvent.parse(#"{"event":"connected","user":"Z","userId":1,"romVersion":0,"dateFixStartYear":1932}"#)
             == .connected(PalmUser(name: "Z", userId: 1), romVersion: 0, dateFixStartYear: 1932))
+    #expect(SessionEvent.parse(#"{"event":"connected","user":"Z","userId":1,"romVersion":0,"lastSyncPC":603880285,"cradleSync":1}"#)
+            == .connected(PalmUser(name: "Z", userId: 1), romVersion: 0, lastSyncPC: 603_880_285, cradleSync: true))
+    #expect(SessionEvent.parse(#"{"event":"backupSkipped","file":"CradleAuthDB.pdb","reason":"protected"}"#)
+            == .backupSkipped(file: "CradleAuthDB.pdb", reason: "protected"))
 }
 
 // MARK: - PalmAdmission

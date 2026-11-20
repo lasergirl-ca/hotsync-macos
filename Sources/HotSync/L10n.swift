@@ -581,6 +581,23 @@ enum L10n {
         "Ein Abgleich, der zehn oder mehr vorhandene Einträge (oder ein Fünftel) auf einer Seite löschen oder ändern würde, wird sonst verweigert – meist steckt eine leere Quelle, ein zurückgesetzter Palm oder eine falsche Zuordnung dahinter, keine Absicht. Neue Einträge zählen nicht. Gilt für einen HotSync und schaltet sich danach aus.",
         "A sync that would delete or change ten or more existing items (or a fifth) on one side is otherwise refused – usually that is an empty source, a reset Palm or a wrong mapping, not intent. New items do not count. Applies to one HotSync and switches itself off afterwards."
     ) }
+    static var cradleToggle: String { s(
+        "Auch abgleichen, wenn zuletzt der Cradle abgeglichen hat", "Sync even when Cradle synced last"
+    ) }
+    static var cradleHint: String { s(
+        "Auf diesem Palm ist CradleSync: ein Cradle-Server gleicht Kalender, Kontakte und Aufgaben ebenfalls ab. Zwei Rechner am selben Palm lassen gelöschte Einträge über den jeweils anderen Weg wieder auftauchen, und jeder Wechsel kostet beide einen vollständigen Abgleich. Aus: hat zuletzt der Cradle abgeglichen, lässt der HotSync diese drei Abgleiche aus; Sicherung, Installation, Uhr und Zeitzonen laufen.",
+        "CradleSync is on this Palm: a Cradle server syncs its calendar, contacts and tasks too. Two desktops on one Palm bring deleted items back through the other path, and every switch costs both a full sync. Off: when Cradle synced last, this HotSync leaves those three syncs out; backup, install, clock and time zones still run."
+    ) }
+    static func logCradleSkipped(_ pc: UInt32) -> String { s(
+        "CradleSync ist auf dem Palm und zuletzt hat der Cradle abgeglichen (PC \(pc)): Kalender, Kontakte und Aufgaben ausgelassen – „Auch abgleichen, wenn zuletzt der Cradle abgeglichen hat“ einschalten, wenn beide sollen",
+        "CradleSync is on the Palm and Cradle synced last (PC \(pc)): calendar, contacts and tasks left out – turn on “Sync even when Cradle synced last” if both should sync"
+    ) }
+    static var logCradlePresent: String { s(
+        "CradleSync ist auf dem Palm: ein Cradle-Server gleicht ihn auch ab", "CradleSync is on the Palm: a Cradle server syncs it too"
+    ) }
+    static func logBackupSkipped(_ name: String) -> String { s(
+        "\(name): nicht gesichert, der Palm schützt die Datenbank", "\(name): not backed up, the Palm protects the database"
+    ) }
     static var logMassAllowReset: String { s(
         "„Viele Änderungen zulassen“ ist wieder aus", "“Allow many changes” is off again"
     ) }

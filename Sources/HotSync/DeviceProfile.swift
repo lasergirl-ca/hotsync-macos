@@ -36,6 +36,13 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     /// nach dem HotSync, der sie gebraucht hat, wieder ausgeschaltet.
     var allowMassDelete: Bool?
 
+    /// CradleSync ist auf dem Palm: ein Cradle-Server gleicht ihn auch ab.
+    /// Gemerkt beim Verbinden, damit die Einstellung dazu erscheint.
+    var cradleSyncSeen: Bool?
+    /// Kalender, Kontakte und Aufgaben auch dann abgleichen, wenn zuletzt
+    /// der Cradle abgeglichen hat; sonst lässt der HotSync sie dann aus.
+    var cradleSharedSync: Bool?
+
     /// Die ID, unter der dieser Mac im Palm als letzter PC steht (lastSyncPC):
     /// eine je Profil, von allen Spiegeln geteilt - der Palm kennt nur eine.
     var syncPCID: UInt32?
@@ -45,6 +52,8 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     var isCalendarTwoWay: Bool { calendarTwoWay ?? false }
     var isContactTwoWay: Bool { contactTwoWay ?? false }
     var isTaskTwoWay: Bool { taskTwoWay ?? false }
+    var isCradleSyncSeen: Bool { cradleSyncSeen ?? false }
+    var isCradleSharedSync: Bool { cradleSharedSync ?? false }
     /// Die Uhr des Palms bei jedem HotSync vom Mac stellen; nil = aus
     var clockSync: Bool?
     /// Die Zeitzonen-Regeln der Orte des Palms aus der tzdata des Macs

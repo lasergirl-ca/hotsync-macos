@@ -23,7 +23,11 @@ public enum SessionEvent: Equatable, Sendable {
     case timeout
     /// `dateFixStartYear`: DateFix is on, the Palm's dates and clock are
     /// shifted by that year minus 1904
-    case connected(PalmUser, romVersion: UInt32, dateFixStartYear: Int? = nil)
+    /// `lastSyncPC`: the ID of the desktop that synced last, 0 for none
+    /// (also in `syncInfo`; here so that the app can decide at connect
+    /// time). `cradleSync`: the CradleSync application is on the Palm, so a
+    /// Cradle server syncs it too.
+    case connected(PalmUser, romVersion: UInt32, dateFixStartYear: Int? = nil, lastSyncPC: UInt32 = 0, cradleSync: Bool = false)
     case installing(file: String)
     case progress(bytes: Int)
     case installed(file: String, bytes: Int)
@@ -36,6 +40,9 @@ public enum SessionEvent: Equatable, Sendable {
     /// database `index` did not change since the last backup: skipped
     case backupUnchanged(file: String, index: Int)
     case backedUp(file: String, bytes: Int)
+    /// Left out on purpose: the Palm protects the database (copy prevention
+    /// without the backup bit), or it is CradleSync's key database.
+    case backupSkipped(file: String, reason: String)
     case backupFailed(file: String, palmOSError: Int)
     case backupFinished(saved: Int, unchanged: Int, failed: Int)
     /// ROM dump into `file` (name in the folder given): `total` bytes of
@@ -106,6 +113,7 @@ public enum SessionEvent: Equatable, Sendable {
         let date: Int?
         let address: String?
         let dateFixStartYear: Int?
+        let cradleSync: Int?
     }
 
     /// Reads one output line; nil for anything that is not a known event
@@ -122,7 +130,8 @@ public enum SessionEvent: Equatable, Sendable {
             return .timeout
         case "connected":
             guard let name = l.user, let userId = l.userId else { return nil }
-            return .connected(PalmUser(name: name, userId: userId), romVersion: l.romVersion ?? 0, dateFixStartYear: l.dateFixStartYear)
+            return .connected(PalmUser(name: name, userId: userId), romVersion: l.romVersion ?? 0, dateFixStartYear: l.dateFixStartYear,
+                              lastSyncPC: l.lastSyncPC ?? 0, cradleSync: (l.cradleSync ?? 0) != 0)
         case "installing":
             guard let file = l.file else { return nil }
             return .installing(file: file)
@@ -152,6 +161,9 @@ public enum SessionEvent: Equatable, Sendable {
         case "backupFailed":
             guard let file = l.file else { return nil }
             return .backupFailed(file: file, palmOSError: l.palmOSError ?? 0)
+        case "backupSkipped":
+            guard let file = l.file else { return nil }
+            return .backupSkipped(file: file, reason: l.reason ?? "")
         case "backupFinished":
             return .backupFinished(saved: l.saved ?? 0, unchanged: l.unchanged ?? 0, failed: l.failed ?? 0)
         case "romStarted":

@@ -116,6 +116,15 @@ final class DeviceManager {
         saveProfiles()
     }
 
+    /// Ob CradleSync beim letzten Verbinden auf dem Palm war; nur Änderungen
+    /// werden gespeichert.
+    func updateCradleSyncSeen(_ seen: Bool, for profileId: UUID) {
+        guard let index = profiles.firstIndex(where: { $0.id == profileId }),
+              profiles[index].isCradleSyncSeen != seen else { return }
+        profiles[index].cradleSyncSeen = seen
+        saveProfiles()
+    }
+
     func updateLastBackup(for profileId: UUID) {
         guard let index = profiles.firstIndex(where: { $0.id == profileId }) else { return }
         profiles[index].lastBackupAt = Date()

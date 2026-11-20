@@ -326,6 +326,21 @@ static int skip_in_backup(const struct DBInfo *info)
 	return strcmp(info->name, "Unsaved Preferences") == 0;
 }
 
+/* Datenbanken, die der Palm vor dem Kopieren schützt: Kopierschutz gesetzt
+ * und das Sicherungsbit nicht - beides sagt "bleibt auf dem Gerät". So legt
+ * CradleSync seine Schlüsseldatenbank CradleAuthDB an (der private Schlüssel
+ * des Palms); sie wird zusätzlich beim Namen genannt, wie bei Cradles eigenem
+ * Werkzeug, samt den Creators des alten Cradle Auth und der wartenden
+ * CradleSync-Aktualisierung. Anders als skip_in_backup wird das gemeldet. */
+static int protected_in_backup(const struct DBInfo *info)
+{
+	if ((info->flags & dlpDBFlagCopyPrevention) && !(info->flags & dlpDBFlagBackup))
+		return 1;
+	if (info->creator == FOURCC('C', 'r', 'A', 'u') || info->creator == FOURCC('C', 'r', 'S', 'n'))
+		return 1;
+	return strcmp(info->name, "CradleAuthDB") == 0;
+}
+
 static void emit_backup_failed(const char *name, const char *reason, int sd)
 {
 	emit_begin("backupFailed");
@@ -344,7 +359,8 @@ static void emit_backup_failed(const char *name, const char *reason, int sd)
  * übersprungen. Geschrieben wird über <Datei>.part, damit ein abgebrochener
  * HotSync die vorige Sicherung einer Datenbank nicht zerstört.
  * Ereignisse: backupStarted (mit Gesamtzahl), je Datenbank backingUp und
- * backedUp / backupUnchanged / backupFailed, am Ende backupFinished. */
+ * backedUp / backupUnchanged / backupFailed, am Ende backupFinished; vorweg
+ * backupSkipped für jede Datenbank, die der Palm schützt. */
 static void backup(int sd, const char *dir)
 {
 	struct DBInfo *list = NULL;
@@ -371,6 +387,16 @@ static void backup(int sd, const char *dir)
 		index = info.index + 1;
 		if (skip_in_backup(&info))
 			continue;
+		if (protected_in_backup(&info)) {
+			char name[256];
+
+			file_name_for(name, sizeof(name), &info);
+			emit_begin("backupSkipped");
+			emit_str("file", name, 0);
+			emit_str("reason", "protected", 0);
+			emit_end();
+			continue;
+		}
 		if (count == capacity) {
 			struct DBInfo *grown;
 
@@ -732,6 +758,17 @@ static int report_identity(int sd)
 	emit_str("user", user.username, 1);
 	emit_int("userId", (long)user.userID);
 	emit_int("romVersion", (long)sys.romVersion);
+	/* auch hier, nicht nur in syncInfo: die App entscheidet beim Verbinden,
+	 * was dieser HotSync tut, und braucht dafür den letzten PC */
+	emit_int("lastSyncPC", (long)user.lastSyncPC);
+	/* CradleSync (Cradle-Server, github lasergirl-ca): ein Palm, den auch
+	 * ein Cradle abgleicht. Die App lässt dann den PIM-Abgleich aus, wenn
+	 * zuletzt der Cradle abgeglichen hat. */
+	{
+		struct DBInfo info;
+		if (dlp_FindDBInfo(sd, 0, 0, "CradleSync", 0, 0, &info) >= 0)
+			emit_int("cradleSync", 1);
+	}
 	/* DateFix (Epoche verschoben, damit der Palm nach 2031 weiterläuft):
 	 * seine Einstellung ist 6 Bytes - Version(2) Startjahr(2) an(1)
 	 * laufende Umstellung(1). Ist es an, sieht der HotSync alle Daten um
