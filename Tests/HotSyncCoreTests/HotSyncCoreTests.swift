@@ -112,6 +112,19 @@ private func imageWithVersion(_ version: String?) -> Data {
             == .userWritten(PalmUser(name: "Palm User", userId: 4711)))
 }
 
+@Test func relayEvents() {
+    #expect(SessionEvent.parse(#"{"event":"relayStarted","target":"cradle.local:14238"}"#)
+            == .relayStarted(target: "cradle.local:14238"))
+    #expect(SessionEvent.parse(#"{"event":"relayed","packets":25,"bytes":4096}"#)
+            == .relayed(packets: 25, bytes: 4096))
+    #expect(SessionEvent.parse(#"{"event":"relayFinished","packets":312,"bytes":98765,"ended":1}"#)
+            == .relayFinished(packets: 312, bytes: 98765, ended: true))
+    #expect(SessionEvent.parse(#"{"event":"relayFinished","packets":3,"bytes":90,"ended":0}"#)
+            == .relayFinished(packets: 3, bytes: 90, ended: false))
+    #expect(SessionEvent.parse(#"{"event":"error","stage":"relay","message":"cannot connect to cradle:14238 (Connection refused)"}"#)
+            == .error(stage: "relay", message: "cannot connect to cradle:14238 (Connection refused)"))
+}
+
 @Test func sessionFailures() {
     #expect(SessionEvent.parse(#"{"event":"failed","file":"a.prc","reason":"palmError","error":-301,"palmOSError":9}"#)
             == .failed(file: "a.prc", .protectedOnPalm))

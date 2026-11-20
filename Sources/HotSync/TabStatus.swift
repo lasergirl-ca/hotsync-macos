@@ -24,6 +24,8 @@ final class TabStatus {
         case readingCalendar(user: PalmUser, database: String, done: Int)
         /// zum Schluss: das ROM wird ausgelesen, `done` von `total` Bytes
         case dumpingROM(user: PalmUser, done: Int, total: Int)
+        /// die Sitzung läuft über Cradle: so viele DLP-Pakete bisher
+        case relaying(user: PalmUser, packets: Int)
     }
 
     /// Ergebnis des ROM-Auslesens im letzten HotSync
@@ -53,6 +55,9 @@ final class TabStatus {
 
     enum Result: Equatable {
         case finished(date: Date, installed: Int, failed: Int)
+        /// der HotSync lief über Cradle; `ended`: Cradle hat ihn beendet
+        /// (sonst brach eine Seite ab)
+        case relayed(date: Date, packets: Int, bytes: Int, ended: Bool)
         /// kein Palm innerhalb der Wartezeit (Kettenschritt)
         case timedOut(date: Date)
         case failed(date: Date, message: String)
@@ -82,7 +87,7 @@ final class TabStatus {
 
     var isSyncing: Bool {
         switch phase {
-        case .restoring, .syncing, .backingUp, .readingCalendar, .dumpingROM: return true
+        case .restoring, .syncing, .backingUp, .readingCalendar, .dumpingROM, .relaying: return true
         default: return false
         }
     }

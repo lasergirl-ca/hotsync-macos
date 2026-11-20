@@ -21,6 +21,9 @@ struct SyncTab: Codable, Identifiable, Equatable {
     /// aus einer Version ohne PIM-Abgleich bleibt bei Installieren und
     /// Sichern, der Abgleich kommt erst, wenn man ihn wählt
     var mode: HotSyncMode?
+    /// "An Cradle weiterreichen": der Cradle-Airlock, "host" oder
+    /// "host:port" (Vorgabe Port 14238)
+    var relayAddress: String?
 
     var hotSyncMode: HotSyncMode {
         get { mode ?? (fullSync == false ? .installOnly : .installBackup) }
@@ -91,10 +94,14 @@ enum HotSyncMode: String, Codable, CaseIterable, Equatable {
     case installBackup
     case installOnly
     case syncOnly
+    /// der ganze HotSync geht an einen Cradle-Server im Netz (LANSync):
+    /// der Mac reicht nur die Pakete durch, Cradle führt die Sitzung
+    case relay
 
     var syncs: Bool { self == .syncInstallBackup || self == .syncOnly }
-    var installs: Bool { self != .syncOnly }
+    var installs: Bool { self != .syncOnly && self != .relay }
     var backsUp: Bool { self == .syncInstallBackup || self == .installBackup }
+    var relays: Bool { self == .relay }
 }
 
 /// Eine Kette: Tabs, die nacheinander syncen - "wenn A fertig ist, B, dann C".

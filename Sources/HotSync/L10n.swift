@@ -216,8 +216,8 @@ enum L10n {
     }
     static var tabSyncMode: String { s("HotSync", "HotSync") }
     static var tabSyncModeHint: String { s(
-        "„Abgleichen“ ist der Abgleich von Kalender, Kontakten, Aufgaben, Uhr und Zeitzonen, wie er für diesen Palm eingestellt ist; „Installieren“ die Warteschlange; „Sichern“ holt nach den Installationen die Datenbanken im RAM des Palms auf den Mac – beim ersten Mal alle, danach nur die geänderten. Für einen langsamen seriellen Tab kann „Nur installieren“ sinnvoll sein.",
-        "“Sync” is the Calendar, Contacts, Tasks, clock and time-zone sync as set up for this Palm; “Install” the queue; “Back Up” fetches the Palm's RAM databases to the Mac after the installs – all of them the first time, then only the changed ones. For a slow serial tab, “Install Only” can make sense."
+        "„Abgleichen“ ist der Abgleich von Kalender, Kontakten, Aufgaben, Uhr und Zeitzonen, wie er für diesen Palm eingestellt ist; „Installieren“ die Warteschlange; „Sichern“ holt nach den Installationen die Datenbanken im RAM des Palms auf den Mac – beim ersten Mal alle, danach nur die geänderten. Für einen langsamen seriellen Tab kann „Nur installieren“ sinnvoll sein. „An Cradle weiterreichen“ gibt den ganzen HotSync an einen Cradle-Server im Netz, wie einst LANSync: Cradle führt die Sitzung und ihre Conduits, der Mac reicht nur die Pakete durch.",
+        "“Sync” is the Calendar, Contacts, Tasks, clock and time-zone sync as set up for this Palm; “Install” the queue; “Back Up” fetches the Palm's RAM databases to the Mac after the installs – all of them the first time, then only the changed ones. For a slow serial tab, “Install Only” can make sense. “Relay to Cradle” hands the whole HotSync to a Cradle server on the network, as LANSync did: Cradle runs the session and its conduits, the Mac only passes the packets through."
     ) }
     static func modeName(_ mode: HotSyncMode) -> String {
         switch mode {
@@ -225,8 +225,15 @@ enum L10n {
         case .syncOnly: return s("Nur abgleichen", "Sync Only")
         case .installBackup: return s("Installieren + Sichern", "Install + Back Up")
         case .installOnly: return s("Nur installieren", "Install Only")
+        case .relay: return s("An Cradle weiterreichen", "Relay to Cradle")
         }
     }
+    static var relayAddressLabel: String { s("Cradle:", "Cradle:") }
+    static var relayAddressPlaceholder: String { "host:14238" }
+    static var relayAddressHint: String { s(
+        "Adresse des Cradle-Airlocks: Host oder Host:Port (Vorgabe: Port 14238, der Netzwerk-HotSync). Der Palm am Kabel wird dort angemeldet, als käme er übers Netz.",
+        "Address of the Cradle airlock: host or host:port (default: port 14238, network HotSync). The Palm on the cable shows up there as if it came over the network."
+    ) }
     static func allTabsMode(_ mode: HotSyncMode) -> String {
         s("Alle Tabs: \(modeName(mode))", "All Tabs: \(modeName(mode))")
     }
@@ -278,6 +285,11 @@ enum L10n {
     static func phaseSyncingNothing(_ name: String) -> String { s(
         "\(name) verbunden – nichts zu installieren", "\(name) connected – nothing to install"
     ) }
+    static func phaseRelaying(_ name: String, _ packets: Int) -> String {
+        packets == 0
+            ? s("\(name): wird an Cradle weitergereicht …", "\(name): relaying to Cradle …")
+            : s("\(name): HotSync läuft über Cradle – \(packets) Pakete", "\(name): HotSync running through Cradle – \(packets) packets")
+    }
 
     // MARK: - Anschlüsse
 
@@ -290,6 +302,13 @@ enum L10n {
 
     // MARK: - Ergebnis einer Sitzung
 
+    static func resultRelayed(_ time: String, _ packets: Int, _ bytes: Int, ended: Bool) -> String {
+        ended
+            ? s("\(time): HotSync über Cradle – \(packets) Pakete, \(bytes) Bytes",
+                "\(time): HotSync through Cradle – \(packets) packets, \(bytes) bytes")
+            : s("\(time): HotSync über Cradle abgebrochen nach \(packets) Paketen – siehe Protokoll",
+                "\(time): HotSync through Cradle cut short after \(packets) packets – see the log")
+    }
     static func resultFinished(_ time: String, _ installed: Int, _ failed: Int) -> String {
         failed == 0
             ? s("\(time): \(installed) Datei(en) installiert", "\(time): \(installed) file(s) installed")
@@ -495,6 +514,23 @@ enum L10n {
         "Palm verbunden: \(identity(name, userId)) – \(files) Datei(en) zu installieren",
         "Palm connected: \(identity(name, userId)) – \(files) file(s) to install"
     ) }
+    static var logRelayNoAddress: String { s(
+        "Keine Cradle-Adresse eingetragen – HotSync beendet, nichts weitergereicht",
+        "No Cradle address set – HotSync ended, nothing relayed"
+    ) }
+    static func logRelayStarting(_ target: String) -> String { s(
+        "Verbinde mit Cradle unter \(target) …", "Connecting to Cradle at \(target) …"
+    ) }
+    static func logRelayStarted(_ target: String) -> String { s(
+        "Verbunden mit \(target) – Cradle führt den HotSync", "Connected to \(target) – Cradle runs the HotSync"
+    ) }
+    static func logRelayFinished(_ packets: Int, _ bytes: Int, ended: Bool) -> String {
+        ended
+            ? s("Cradle hat den HotSync beendet: \(packets) Pakete, \(bytes) Bytes durchgereicht",
+                "Cradle ended the HotSync: \(packets) packets, \(bytes) bytes relayed")
+            : s("Verbindung abgebrochen nach \(packets) Paketen, \(bytes) Bytes",
+                "Connection cut short after \(packets) packets, \(bytes) bytes")
+    }
     static func logPalmRejected(_ name: String, _ userId: UInt32) -> String { s(
         "Palm \(identity(name, userId)) gehört nicht hierher – nichts installiert",
         "Palm \(identity(name, userId)) does not belong here – nothing installed"

@@ -73,6 +73,16 @@ public enum SessionEvent: Equatable, Sendable {
     /// this Mac is the Palm's primary PC for network HotSync now
     case netSyncSet(address: String, name: String)
 
+    // Relay: the session goes to a HotSync server on the network (Cradle)
+
+    /// connected to `target`, the server runs the HotSync from here on
+    case relayStarted(target: String)
+    /// a running count: DLP requests answered so far, bytes both ways
+    case relayed(packets: Int, bytes: Int)
+    /// the session is over; `ended`: the server ended it with EndOfSync
+    /// (otherwise a side went away, an `error` said which)
+    case relayFinished(packets: Int, bytes: Int, ended: Bool)
+
     private struct Line: Decodable {
         let event: String
         let port: String?
@@ -106,6 +116,9 @@ public enum SessionEvent: Equatable, Sendable {
         let date: Int?
         let address: String?
         let dateFixStartYear: Int?
+        let target: String?
+        let packets: Int?
+        let ended: Int?
     }
 
     /// Reads one output line; nil for anything that is not a known event
@@ -207,6 +220,12 @@ public enum SessionEvent: Equatable, Sendable {
         case "netSyncSet":
             guard let address = l.address else { return nil }
             return .netSyncSet(address: address, name: l.name ?? "")
+        case "relayStarted":
+            return .relayStarted(target: l.target ?? "")
+        case "relayed":
+            return .relayed(packets: l.packets ?? 0, bytes: l.bytes ?? 0)
+        case "relayFinished":
+            return .relayFinished(packets: l.packets ?? 0, bytes: l.bytes ?? 0, ended: (l.ended ?? 0) != 0)
         default:
             return nil
         }
