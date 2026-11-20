@@ -136,15 +136,8 @@ def free_port():
     return port
 
 
-def main():
-    tool = sys.argv[1] if len(sys.argv) > 1 else ".build/release/hotsync-session"
-    listener = socket.socket()
-    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(("127.0.0.1", 0))
-    listener.listen(1)
-    airlock_port = listener.getsockname()[1]
-    palm_port = free_port()
-
+def start_tool(tool, palm_port):
+    """The tool listening on net:, with a reader for its events."""
     proc = subprocess.Popen([tool, "--port", f"net:any:{palm_port}", "--timeout", "15"],
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     events = []
@@ -157,6 +150,45 @@ def main():
         events.append(ev)
         return ev
 
+    return proc, events, event
+
+
+def test_refused(tool):
+    """No airlock at the address: an error, and the session goes on here
+    (the Palm gets the tool's own EndOfSync once "end" is sent)."""
+    palm_port = free_port()
+    closed = free_port()
+    proc, events, event = start_tool(tool, palm_port)
+    assert event()["event"] == "listening"
+    seen, palm_done = [], threading.Event()
+    threading.Thread(target=fake_palm, args=(palm_port, seen, palm_done), daemon=True).start()
+    assert event()["event"] == "connected"
+    assert event()["event"] == "syncInfo"
+    proc.stdin.write(f"relay 127.0.0.1:{closed}\n".encode())
+    proc.stdin.flush()
+    ev = event()
+    assert ev["event"] == "error" and ev["stage"] == "relay" and "cannot connect" in ev["message"], ev
+    proc.stdin.write(b"end\n")
+    proc.stdin.flush()
+    assert event()["event"] == "finished"
+    proc.stdin.close()
+    assert proc.wait(timeout=10) == 0
+    assert palm_done.wait(5), "the fake Palm did not finish"
+    assert seen[-1] == 0x2F and seen.count(0x2F) == 1, seen
+    print(f"ok: a refused relay leaves the session to the tool; the Palm saw {[hex(f) for f in seen]}")
+
+
+def main():
+    tool = sys.argv[1] if len(sys.argv) > 1 else ".build/release/hotsync-session"
+    test_refused(tool)
+    listener = socket.socket()
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    airlock_port = listener.getsockname()[1]
+    palm_port = free_port()
+
+    proc, events, event = start_tool(tool, palm_port)
     ev = event()
     assert ev["event"] == "listening", ev
 
@@ -182,7 +214,7 @@ def main():
     proc.stdin.close()
     code = proc.wait(timeout=10)
     assert code == 0, (code, proc.stderr.read().decode())
-    assert not palm_done.wait(5) is False, "the fake Palm did not finish"
+    assert palm_done.wait(5), "the fake Palm did not finish"
 
     assert result["sysinfo"] == dlp_reply(0x12, SYSINFO), result
     assert result["userinfo"] == dlp_reply(0x10, USERINFO), result
