@@ -1346,12 +1346,10 @@ final class AppState {
                     tabLog(tabId, L10n.logNetSyncNoAddress)
                 }
             }
-            if profile.isZoneSyncOn {
-                if family == .garnet {
-                    session.fixDatabases = ["locLTimeZoneDB", "locLDefLocationDB", "locLCusLocationDB"]
-                } else {
-                    tabLog(tabId, L10n.logZonesNeedGarnet(palmOS.description))
-                }
+            // Zeitzonen-Datenbanken gibt es erst ab Palm OS 5.2; davor zeigt
+            // der Tab den Schalter nicht
+            if profile.isZoneSyncOn, family == .garnet {
+                session.fixDatabases = ["locLTimeZoneDB", "locLDefLocationDB", "locLCusLocationDB"]
             }
             // Erst sichern, dann ersetzen: ohne Sicherung dieses Palms gehen
             // sein eigener Kalender und seine Kontakte nicht verloren
