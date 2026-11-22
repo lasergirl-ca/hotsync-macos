@@ -620,10 +620,6 @@ enum L10n {
         "Palm OS \(version): Datebook, Address und To Do – Ort, Geburtstag, IM, Webseite, Alarm und Wiederholung von Aufgaben kennt der Palm nicht, sie bleiben auf dem Mac",
         "Palm OS \(version): Datebook, Address and To Do – the Palm has no location, birthday, IM, web site, task alarm or task repeat; those stay on the Mac"
     ) }
-    static func logZonesNeedGarnet(_ version: String) -> String { s(
-        "Palm OS \(version): Zeitzonen brauchen Palm OS 5.2 oder neuer – ausgelassen",
-        "Palm OS \(version): time zones need Palm OS 5.2 or later – skipped"
-    ) }
     static func palmOSClassic(_ version: String) -> String { s(
         "Dieser Palm hat Palm OS \(version) mit Datebook, Address und To Do. Kalender, Kontakte und Aufgaben werden über diese Programme abgeglichen; was der Palm nicht hat (Ort, Geburtstag, IM, Webseite, Alarm und Wiederholung bei Aufgaben, mehr als fünf Telefonnummern oder eine Adresse), bleibt auf dem Mac. Zeitzonen gibt es erst ab Palm OS 5.2.",
         "This Palm runs Palm OS \(version) with Datebook, Address and To Do. Calendar, Contacts and Tasks sync through those; what the Palm has no field for (location, birthday, IM, web site, task alarms and repeats, more than five phone numbers or one address) stays on the Mac. Time zones need Palm OS 5.2 or later."

@@ -809,16 +809,20 @@ struct TimeSyncSection: View {
                 Text(L10n.clockSyncHint)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Toggle(isOn: Binding(
-                    get: { appState.deviceManager.profile(profileId)?.isZoneSyncOn ?? false },
-                    set: { appState.setZoneSync($0, for: profileId) }
-                )) {
-                    Text(L10n.zoneSyncToggle)
+                // Zeitzonen-Datenbanken (locL*) gibt es erst ab Palm OS 5.2;
+                // davor liegen die Zonen in den Systemeinstellungen
+                if appState.deviceManager.profile(profileId)?.palmOS?.hasGarnetPIM != false {
+                    Toggle(isOn: Binding(
+                        get: { appState.deviceManager.profile(profileId)?.isZoneSyncOn ?? false },
+                        set: { appState.setZoneSync($0, for: profileId) }
+                    )) {
+                        Text(L10n.zoneSyncToggle)
+                    }
+                    Text(L10n.zoneSyncHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(L10n.zoneSyncHint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
                 Toggle(isOn: Binding(
                     get: { appState.deviceManager.profile(profileId)?.isNetSyncOn ?? false },
                     set: { appState.setNetSync($0, for: profileId) }
