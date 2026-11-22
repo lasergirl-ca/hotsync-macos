@@ -33,6 +33,7 @@ The licenses of the included pilot-link library (libpisock) and libusb are in
 - **Checked before the HotSync** &ndash; every file's Palm database header is read: database name, **version** (of an application: its `tver` resource), type/creator and size are shown, and files HotSync cannot install (wrong format, truncated, …) are marked red and never sent
 - **Reasons, not just "failed"** &ndash; a file the Palm refused stays in the queue with the reason (e.g. protected or in use on the Palm, not enough memory) and is tried again with the next HotSync
 - **Backups with every HotSync** &ndash; after the installs, the Palm's RAM databases (applications, data, settings) are fetched into `~/HotSync/<device>/Backup/`: all of them the first time, afterwards only the ones that changed, so later backups take seconds. A progress bar shows "12 of 257 databases". A backup cut short (cancel on the Palm, cable pulled) keeps the previous state of every database it did not get to. Per tab, **"HotSync: Install + Back Up"** or **"Install Only"** (say, for a slow serial tab), or set for all tabs at once
+- **Calendar, Contacts and Tasks** &ndash; synced with macOS Calendar, Contacts and Reminders, one-way (Mac to Palm) or two-way with conflict handling, per device. On Palm OS 5.2 and later these are the Garnet applications; before that (an m515, a Vx, …) Datebook, Address and To Do, with what the Palm cannot hold &ndash; locations, birthdays, task alarms &ndash; staying on the Mac
 - **Restore** &ndash; "Backup → Restore at the next HotSync" puts the whole backup back onto the Palm. For a Palm that lost its memory (empty batteries, a dead backup capacitor, a hard reset): put it into the cradle, press HotSync, choose **Take Over a Known Device** and the device in the dialog, keep "Restore the backup" ticked &ndash; one HotSync brings back its name and ID, applications, data and settings
 - **ROM dump** &ndash; "Backup → Read the ROM at the next HotSync" saves the Palm's ROM image as `~/HotSync/<device>/ROM/PalmOS-<version>.rom`, with a progress bar (an m515's 4 MB take under 3 minutes) &ndash; for emulators such as POSE or CloudpilotEmu. Palm OS 1 to 4 only: Palm OS 5 dropped the remote calls of the HotSync protocol this needs (they crash the Palm), so HotSync checks the version first and does not try
 - **New Palms are asked about** &ndash; a Palm HotSync does not know yet brings up a dialog while it waits in the cradle: add it as a **new device** with its own tab and queue, under its own name or a new one, or **take over a known device** picked from a list (with its backup). Name and ID are written to that very Palm in the same HotSync, which then goes on to install its queue
@@ -218,9 +219,7 @@ This is a hobby project that does its job for me, but it has rough edges:
 - **One Palm per port at a time.** pilot-link takes the first Palm it finds on any USB bus and
   cannot address a particular one, so two USB Palms cannot sync at the same time. Use a chain to
   sync them one after another; USB and serial ports do run at the same time.
-- **No real two-way sync.** The app installs files and backs up and restores whole databases.
-  Addresses, dates and memos are not synced with macOS Contacts or Calendar like with the
-  original Palm Desktop.
+- **Memos are not synced.** Calendar, Contacts and Tasks are; Memo Pad is only backed up.
 - The Palm only appears on the USB bus while a HotSync is running, so a USB cradle itself is
   invisible: for USB, the app can only show which Palm reported last, not when the cradle was
   plugged in.
