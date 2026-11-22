@@ -27,22 +27,21 @@ struct TabDetailView: View {
                             resultBox(status)
                         }
                     }
-                    if palmOS?.hasGarnetPIM ?? true {
-                        DryRunSection(profileId: tab.profileId)
-                        CalendarSyncSection(profileId: tab.profileId)
-                        ContactSyncSection(profileId: tab.profileId)
-                        TaskSyncSection(profileId: tab.profileId)
-                        TimeSyncSection(profileId: tab.profileId)
-                    } else if let os = palmOS {
-                        // Datebook/Address/ToDo-Geräte: kein Abgleich, keine Zeitzonen, nur die Uhr
+                    if let os = palmOS, !os.hasGarnetPIM {
+                        // Datebook/Address/To Do: derselbe Abgleich über die klassischen Datenbanken
                         GroupBox {
-                            Text(L10n.palmOSTooOld(os.description))
+                            Text(L10n.palmOSClassic(os.description))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(4)
                         }
                     }
+                    DryRunSection(profileId: tab.profileId)
+                    CalendarSyncSection(profileId: tab.profileId)
+                    ContactSyncSection(profileId: tab.profileId)
+                    TaskSyncSection(profileId: tab.profileId)
+                    TimeSyncSection(profileId: tab.profileId)
                     if let queue = appState.queue(for: tab) {
                         QueueSection(queue: queue, profileId: tab.profileId,
                                      isSyncing: appState.status(tab.id)?.isSyncing == true)

@@ -19,6 +19,11 @@ public struct TaskWriter {
 
     public let store: EKEventStore
     public let homeZone: TimeZone
+    /// What the Palm can hold of a task (a classic To Do: no alarm, no
+    /// repeat, done or not done without a date): the Mac's reminder is seen
+    /// through it before the comparison, so what the Palm cannot hold is
+    /// never rewritten. nil: every shared field.
+    public var limit: (@Sendable (SyncedTask) -> SyncedTask)?
     /// Which Reminders list a Palm category goes to.
     public let listForCategory: (String) -> EKCalendar?
     /// Where a new reminder goes when no list matches its category.
@@ -54,7 +59,8 @@ public struct TaskWriter {
     /// Writes the fields in which `item` differs from what the reminder
     /// holds now, seen through the builder.
     public func fill(_ r: EKReminder, from item: SyncedTask) {
-        let now = SyncedTask(builder.palmTask(ReminderSource.macReminder(r, calendar: calendar)), category: item.category)
+        var now = SyncedTask(builder.palmTask(ReminderSource.macReminder(r, calendar: calendar)), category: item.category)
+        if let limit { now = limit(now) }
 
         if item.differs(from: now, in: .title) { r.title = item.title ?? "" }
         if item.differs(from: now, in: .note) {
@@ -78,7 +84,9 @@ public struct TaskWriter {
         if item.differs(from: now, in: .completedDate) {
             if let done = item.completedDate {
                 r.isCompleted = true
-                r.completionDate = CalendarWriter.date(done, nil, in: calendar)
+                // a Palm that knows no completion date (classic To Do)
+                // says only "done": that is now
+                r.completionDate = limit == nil ? CalendarWriter.date(done, nil, in: calendar) : Date()
             } else {
                 r.isCompleted = false
                 r.completionDate = nil

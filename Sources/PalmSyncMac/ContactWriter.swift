@@ -24,9 +24,16 @@ public struct ContactWriter {
     /// Where a contact the Palm made goes: the first chosen account.
     public var newContactsContainer: String? { containerIDs.first }
 
-    public init(store: CNContactStore, containerIDs: [String]) {
+    /// What the Palm can hold of a contact (a classic Address: five
+    /// phones, one address, no IM, web site or birthday): the Mac's contact
+    /// is seen through it before the comparison, so a field the Palm has
+    /// no slot for is never rewritten. nil: every shared field.
+    public var limit: (@Sendable (SyncedContact) -> SyncedContact)?
+
+    public init(store: CNContactStore, containerIDs: [String], limit: (@Sendable (SyncedContact) -> SyncedContact)? = nil) {
         self.store = store
         self.containerIDs = containerIDs
+        self.limit = limit
     }
 
     static let keys: [CNKeyDescriptor] = [
@@ -70,8 +77,10 @@ public struct ContactWriter {
     /// Writes the fields in which `item` differs from what the contact
     /// holds now. A phone or e-mail the Mac has beyond the Palm's slots is
     /// kept; one the Palm dropped from a slot is dropped.
-    public static func fill(_ c: CNMutableContact, from item: SyncedContact) {
-        let now = SyncedContact(ContactSource.macContact(c, containerID: "", groups: []), category: item.category)
+    public static func fill(_ c: CNMutableContact, from item: SyncedContact,
+                            limit: (@Sendable (SyncedContact) -> SyncedContact)? = nil) {
+        var now = SyncedContact(ContactSource.macContact(c, containerID: "", groups: []), category: item.category)
+        if let limit { now = limit(now) }
 
         if item.differs(from: now, in: .firstName) {
             c.givenName = item.firstName ?? ""
@@ -166,7 +175,7 @@ public struct ContactWriter {
 
         for change in plan.macCreates {
             let c = CNMutableContact()
-            Self.fill(c, from: change.item)
+            Self.fill(c, from: change.item, limit: limit)
             let request = CNSaveRequest()
             request.add(c, toContainerWithIdentifier: newContactsContainer)
             place(c, in: change.item.category, request: request)
@@ -186,7 +195,7 @@ public struct ContactWriter {
                 continue
             }
             let c = existing.mutableCopy() as! CNMutableContact
-            Self.fill(c, from: change.item)
+            Self.fill(c, from: change.item, limit: limit)
             let request = CNSaveRequest()
             request.update(c)
             // group membership changes only when the Palm changed the category

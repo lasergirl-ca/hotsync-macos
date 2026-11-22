@@ -1297,19 +1297,17 @@ final class AppState {
 
         let mode = tabStore.tab(tabId)?.hotSyncMode ?? .installBackup
         let palmOS = PalmOSVersion(rom: session.romVersion)
-        if mode.syncs, let profile = deviceManager.profile(profileId), !palmOS.hasGarnetPIM {
-            // Datebook/Address/ToDo-Geräte: die P*-Datenbanken und locL* gibt es nicht
-            if profile.calendarSync?.enabled == true || profile.contactSync?.enabled == true || profile.taskSync?.enabled == true
-                || profile.isZoneSyncOn {
-                tabLog(tabId, L10n.logPalmOSTooOld(palmOS.description))
-            }
-            if profile.isClockSyncOn {
-                if profile.isDryRun { tabLog(tabId, L10n.logDryRunClock) } else { session.runner.send("settime") }
-            }
-        }
-        if mode.syncs, let profile = deviceManager.profile(profileId), palmOS.hasGarnetPIM {
+        if mode.syncs, let profile = deviceManager.profile(profileId) {
             let dry = profile.isDryRun
             if dry { tabLog(tabId, L10n.logDryRun) }
+            // Datebook/Address/To Do (vor Palm OS 5.2): dieselben Abgleiche
+            // über die klassischen Datenbanken, siehe PalmPIMFamily; nur
+            // die Zeitzonen (locL*) gibt es dort nicht
+            let family = palmOS.pimFamily
+            if family == .classic, profile.calendarSync?.enabled == true || profile.contactSync?.enabled == true
+                || profile.taskSync?.enabled == true {
+                tabLog(tabId, L10n.logPalmOSClassic(palmOS.description))
+            }
             // CradleSync auf dem Palm: ein Cradle-Server gleicht Kalender,
             // Kontakte und Aufgaben auch ab. Hat zuletzt er abgeglichen,
             // bleiben die drei hier aus (zwei Rechner am selben Palm holen
@@ -1348,7 +1346,13 @@ final class AppState {
                     tabLog(tabId, L10n.logNetSyncNoAddress)
                 }
             }
-            if profile.isZoneSyncOn { session.fixDatabases = ["locLTimeZoneDB", "locLDefLocationDB", "locLCusLocationDB"] }
+            if profile.isZoneSyncOn {
+                if family == .garnet {
+                    session.fixDatabases = ["locLTimeZoneDB", "locLDefLocationDB", "locLCusLocationDB"]
+                } else {
+                    tabLog(tabId, L10n.logZonesNeedGarnet(palmOS.description))
+                }
+            }
             // Erst sichern, dann ersetzen: ohne Sicherung dieses Palms gehen
             // sein eigener Kalender und seine Kontakte nicht verloren
             if pimSync, let settings = profile.calendarSync, settings.enabled {
@@ -1356,36 +1360,39 @@ final class AppState {
                     tabLog(tabId, L10n.logCalendarNeedsBackup)   // ein- wie beidseitig: erst sichern
                 } else if profile.isCalendarTwoWay {
                     // nach der Sicherung: Palm lesen, zusammenführen, dann schreiben
-                    session.twoWayDatabases.append(CalendarBuilder.databaseName)
+                    session.twoWayDatabases.append(family.databaseName(.calendar))
                     tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayCalendar))
                 } else {
-                    queueCalendar(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears)
-                    if !dry { session.checkDatabases.append(CalendarBuilder.databaseName) }
+                    queueCalendar(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears,
+                                  family: family)
+                    if !dry { session.checkDatabases.append(family.databaseName(.calendar)) }
                 }
             }
             if pimSync, let settings = profile.contactSync, settings.enabled {
                 if profile.lastBackupAt == nil {
                     tabLog(tabId, L10n.logContactsNeedBackup)
                 } else if profile.isContactTwoWay {
-                    session.twoWayDatabases.append(ContactsBuilder.databaseName)
+                    session.twoWayDatabases.append(family.databaseName(.contacts))
                     tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayContacts))
                 } else {
-                    queueContacts(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears)
-                    if !dry { session.checkDatabases.append(ContactsBuilder.databaseName) }
+                    queueContacts(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears,
+                                  family: family)
+                    if !dry { session.checkDatabases.append(family.databaseName(.contacts)) }
                 }
             }
             if pimSync, let settings = profile.taskSync, settings.enabled {
                 if profile.lastBackupAt == nil {
                     tabLog(tabId, L10n.logTasksNeedBackup)
                 } else if profile.isTaskTwoWay {
-                    session.twoWayDatabases.append(TasksBuilder.databaseName)
+                    session.twoWayDatabases.append(family.databaseName(.tasks))
                     tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayTasks))
                 } else {
-                    if !dry { session.checkDatabases.append(TasksBuilder.databaseName) }
+                    if !dry { session.checkDatabases.append(family.databaseName(.tasks)) }
                     // Reminders liefert asynchron; der Palm wartet solange (Lebenszeichen)
                     Task { @MainActor [weak self, weak session] in
                         guard let self, let session else { return }
-                        await self.queueTasks(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears)
+                        await self.queueTasks(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears,
+                                              family: family)
                         self.startQueue(session, profileId: profileId, tabId: tabId, user: user, queue: queue, mode: mode)
                     }
                     return
@@ -1400,7 +1407,7 @@ final class AppState {
     private func startQueue(_ session: Session, profileId: UUID, tabId: UUID, user: PalmUser, queue: InstallQueue, mode: HotSyncMode) {
         // "Nur abgleichen": von der Warteschlange gehen nur die Datenbanken
         // des Abgleichs auf den Palm, der Rest wartet
-        let synced = [CalendarBuilder.databaseName, ContactsBuilder.databaseName, TasksBuilder.databaseName].map { "\($0).pdb" }
+        let synced = [PalmPIMFamily.garnet, .classic].flatMap { family in PalmPIMFamily.Kind.allCases.map { "\(family.databaseName($0)).pdb" } }
         let files = mode.installs ? queue.pendingFiles : queue.pendingFiles.filter { synced.contains($0.lastPathComponent) }
         session.files = files
         queue.beginInstall(files, session: session.token)
@@ -1508,13 +1515,14 @@ final class AppState {
     }
 
     private func queueCalendar(_ settings: CalendarSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue, dryRun: Bool,
-                               dateFixYears: Int) {
+                               dateFixYears: Int, family: PalmPIMFamily = .garnet) {
         guard let profile = deviceManager.profile(profileId) else { return }
         do {
-            let run = try CalendarSyncRun(settings: settings, source: calendarSource, dateShift: dateFixYears)
-            let url = try syncTarget(CalendarBuilder.databaseName, for: profile, dryRun: dryRun)
+            let run = try CalendarSyncRun(settings: settings, source: calendarSource, dateShift: dateFixYears, family: family)
+            let name = family.databaseName(.calendar)
+            let url = try syncTarget(name, for: profile, dryRun: dryRun)
             let bytes = try writeDatabase(run.database, to: url)
-            if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(CalendarBuilder.databaseName, run.report.records, bytes)); return }
+            if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(name, run.report.records, bytes)); return }
             queue.refresh()
             tabLog(tabId, L10n.logCalendarQueued(run.report.records, run.report.seriesMapped, bytes))
             for warning in run.report.warnings { tabLog(tabId, L10n.logCalendarWarning(warning)) }
@@ -1576,11 +1584,10 @@ final class AppState {
         for record in session.calendarRecords {
             if record.isDeleted { deleted += 1; continue }
             let back: Data?
-            switch name {
-            case CalendarBuilder.databaseName: back = (try? CalendarEvent(data: record.data))?.encode()
-            case ContactsBuilder.databaseName: back = (try? Contact(data: record.data))?.encode()
-            case TasksBuilder.databaseName: back = (try? PalmTask(data: record.data))?.encode()
-            default: back = record.data
+            if let kind = PalmPIMFamily.kind(ofDatabase: name), let family = PalmPIMFamily.family(ofDatabase: name) {
+                back = family.readsBack(record.data, kind: kind) ? record.data : nil
+            } else {
+                back = record.data
             }
             if back == record.data {
                 identical += 1
@@ -1592,11 +1599,10 @@ final class AppState {
         }
         let categories: [String]
         if let info = session.calendarAppInfo {
-            switch name {
-            case CalendarBuilder.databaseName: categories = (try? CalendarAppInfo(data: info))?.categories.named.map(\.name) ?? []
-            case ContactsBuilder.databaseName: categories = (try? ContactAppInfo(data: info))?.categories.named.map(\.name) ?? []
-            case TasksBuilder.databaseName: categories = (try? TaskAppInfo(data: info))?.categories.named.map(\.name) ?? []
-            default: categories = (try? CategoryAppInfo(bytes: [UInt8](info)[...]))?.named.map(\.name) ?? []
+            if let kind = PalmPIMFamily.kind(ofDatabase: name), let family = PalmPIMFamily.family(ofDatabase: name) {
+                categories = family.categories(ofAppInfo: info, kind: kind)?.named.map(\.name) ?? []
+            } else {
+                categories = (try? CategoryAppInfo(bytes: [UInt8](info)[...]))?.named.map(\.name) ?? []
             }
         } else {
             categories = []
@@ -1630,11 +1636,17 @@ final class AppState {
     }
 
     private func twoWayName(_ database: String) -> String {
-        switch database {
-        case ContactsBuilder.databaseName: return L10n.twoWayContacts
-        case TasksBuilder.databaseName: return L10n.twoWayTasks
+        switch PalmPIMFamily.kind(ofDatabase: database) {
+        case .contacts: return L10n.twoWayContacts
+        case .tasks: return L10n.twoWayTasks
         default: return L10n.twoWayCalendar
         }
+    }
+
+    /// Die PIM-Programme des Palms: Garnet (ab Palm OS 5.2) oder die
+    /// klassischen Datebook, Address und To Do.
+    private func pimFamily(_ session: Session) -> PalmPIMFamily {
+        PalmOSVersion(rom: session.romVersion).pimFamily
     }
 
     /// Die PC-ID eines Profils: einmal festgelegt und gespeichert. Ein Profil
@@ -1667,9 +1679,9 @@ final class AppState {
             session.runner.send("closedb")
             return
         }
-        switch session.twoWayCurrent {
-        case ContactsBuilder.databaseName: twoWayContacts(session, profile: profile)
-        case TasksBuilder.databaseName: twoWayTasks(session, profile: profile)
+        switch session.twoWayCurrent.flatMap(PalmPIMFamily.kind(ofDatabase:)) {
+        case .contacts: twoWayContacts(session, profile: profile)
+        case .tasks: twoWayTasks(session, profile: profile)
         default: twoWayCalendar(session, profile: profile)
         }
     }
@@ -1727,7 +1739,10 @@ final class AppState {
         mirror.dateFixStartYear = startYear
         if !fast, !mirror.entries.isEmpty { tabLog(tabId, L10n.logTwoWayDeletesUntrusted(what)) }
         let bases = Dictionary(mirror.entries.map { ($0.palmID, $0.base) }, uniquingKeysWith: { a, _ in a })
-        let palm = PalmSnapshot.all(session.calendarRecords)   // es wird immer alles gelesen
+        // es wird immer alles gelesen; ein klassischer Palm liefert Datebook-,
+        // Address- und To-Do-Datensätze, die hier zu Garnet-Datensätzen werden
+        let kind = session.twoWayCurrent.flatMap(PalmPIMFamily.kind(ofDatabase:)) ?? .calendar
+        let palm = PalmSnapshot.all(pimFamily(session).garnetRecords(session.calendarRecords, kind: kind))
 
         func report(_ plan: SyncPlan<Item>, policy: ConflictPolicy) {
             tabLog(tabId, L10n.logTwoWaySummary(what, toPalm: plan.palmWrites.count, palmDeletes: plan.palmDeletes.count + plan.agedOut.count,
@@ -1873,7 +1888,9 @@ final class AppState {
             session.runner.send("closedb")
             return
         }
-        let appInfo = session.calendarAppInfo.flatMap { try? CalendarAppInfo(data: $0) }
+        let family = pimFamily(session)
+        let existingAppInfo = session.calendarAppInfo
+        let palmCategories = existingAppInfo.flatMap { family.categories(ofAppInfo: $0, kind: .calendar) }
         let calendar = Foundation.Calendar.current
         let startOfWeek: UInt8 = calendar.firstWeekday == 2 ? 1 : 0
         let today = calendar.startOfDay(for: Date())
@@ -1889,10 +1906,10 @@ final class AppState {
                                                      calendars: settings.macCalendars, startOfWeek: startOfWeek))
         let (start, end) = (PalmDate(windowStart, in: calendar), PalmDate(windowEnd, in: calendar))
         let engine = SyncEngine<SyncedEvent>(conflictPolicy: settings.conflicts) { $0.date >= start && $0.date <= end }
-        let mac = builder.items(events).items.map {
+        let mac = family.limited(builder.items(events).items.map {
             MacSyncItem(key: $0.key, item: SyncedEvent($0.event, category: $0.category), macOwned: $0.macOwned,
                         palmRecord: $0.event.encode())
-        }
+        })
         let calendars = settings.calendars
         let store = calendarSource.store
         let writer = CalendarWriter(store: store, homeZone: .current,
@@ -1902,15 +1919,16 @@ final class AppState {
             return id.flatMap { store.calendar(withIdentifier: $0) }
         }
         twoWayRun(session, profile: profile, what: L10n.twoWayCalendar, mirrorFile: "calendar-mirror.json", engine: engine,
-                  palmCategories: appInfo?.categories.names ?? ["Unfiled"], mac: mac,
+                  palmCategories: palmCategories?.names ?? ["Unfiled"], mac: mac,
                   titleOf: { (try? CalendarEvent(data: $0))?.title },
                   applyMac: { plan in
                       let r = writer.apply(plan)
                       return (r.createdKeys, r.updated, r.deleted, r.failures, r.failedEntries)
                   },
                   palmDatabase: { plan in
-                      let (db, ids, _) = plan.palmDatabase(categories: appInfo?.categories ?? CategoryAppInfo(), startOfWeek: startOfWeek)
-                      return (db, ids)
+                      let (db, ids, categories) = plan.palmDatabase(categories: palmCategories ?? CategoryAppInfo(), startOfWeek: startOfWeek)
+                      let appInfo = family.classicAppInfo(kind: .calendar, existing: existingAppInfo, categories: categories, startOfWeek: startOfWeek)
+                      return (family.deviceDatabase(db, kind: .calendar, appInfo: appInfo), ids)
                   },
                   completion: { session.runner.send("closedb") })
     }
@@ -1925,11 +1943,17 @@ final class AppState {
             session.runner.send("closedb")
             return
         }
-        guard let appInfoData = session.calendarAppInfo, let appInfo = try? ContactAppInfo(data: appInfoData) else {
-            tabLog(tabId, L10n.logTwoWayFailed("ContactsDB-PAdd: AppInfo"))
+        let family = pimFamily(session)
+        guard let appInfoData = session.calendarAppInfo, let categories = family.categories(ofAppInfo: appInfoData, kind: .contacts) else {
+            tabLog(tabId, L10n.logTwoWayFailed("\(family.databaseName(.contacts)): AppInfo"))
             session.runner.send("closedb")
             return
         }
+        // der Palm-eigene AppInfo (Beschriftungen, Land, Sortierung) bleibt;
+        // ein klassischer Palm hat keinen Garnet-AppInfo, die Garnet-Datenbank
+        // ist dann nur Zwischenstufe
+        let garnetAppInfo = (try? ContactAppInfo(data: appInfoData))
+            ?? ContactAppInfo(categories: categories, labels: Array(repeating: "", count: ContactAppInfo.labelCountV11))
         let containers = settings.containers.map(\.id)
         let macContacts: [MacContact]
         do { macContacts = try contactSource.contacts(in: containers) } catch {
@@ -1945,17 +1969,18 @@ final class AppState {
             let startYear = 1904 + session.dateFixYears
             engine.unclamp = { item, base in DateFix.unclamp(item, startYear: startYear, base: base) }
         }
-        let writer = ContactWriter(store: contactSource.store, containerIDs: containers)
+        let writer = ContactWriter(store: contactSource.store, containerIDs: containers, limit: family.contactLimit)
         twoWayRun(session, profile: profile, what: L10n.twoWayContacts, mirrorFile: "contacts-mirror.json", engine: engine,
-                  palmCategories: appInfo.categories.names, mac: builder.syncItems(macContacts),
+                  palmCategories: categories.names, mac: family.limited(builder.syncItems(macContacts)),
                   titleOf: { (try? Contact(data: $0)).map { SyncedContact($0, category: "").title ?? "" } },
                   applyMac: { plan in
                       let r = writer.apply(plan)
                       return (r.createdKeys, r.updated, r.deleted, r.failures, r.failedEntries)
                   },
                   palmDatabase: { plan in
-                      let (db, ids, _) = plan.palmDatabase(appInfo: appInfo)
-                      return (db, ids)
+                      let (db, ids, categories) = plan.palmDatabase(appInfo: garnetAppInfo)
+                      let appInfo = family.classicAppInfo(kind: .contacts, existing: appInfoData, categories: categories)
+                      return (family.deviceDatabase(db, kind: .contacts, appInfo: appInfo), ids)
                   },
                   completion: { session.runner.send("closedb") })
     }
@@ -1971,11 +1996,13 @@ final class AppState {
             session.runner.send("closedb")
             return
         }
-        guard let appInfoData = session.calendarAppInfo, let appInfo = try? TaskAppInfo(data: appInfoData) else {
-            tabLog(tabId, L10n.logTwoWayFailed("TasksDB-PTod: AppInfo"))
+        let family = pimFamily(session)
+        guard let appInfoData = session.calendarAppInfo, let categories = family.categories(ofAppInfo: appInfoData, kind: .tasks) else {
+            tabLog(tabId, L10n.logTwoWayFailed("\(family.databaseName(.tasks)): AppInfo"))
             session.runner.send("closedb")
             return
         }
+        let garnetAppInfo = (try? TaskAppInfo(data: appInfoData)) ?? TaskAppInfo(categories: categories)
         // Reminders liefert asynchron; der Palm wartet solange (Lebenszeichen)
         Task { @MainActor [weak self, weak session] in
             guard let self, let session else { return }
@@ -1995,21 +2022,23 @@ final class AppState {
             let engine = SyncEngine<SyncedTask>(conflictPolicy: settings.conflicts, inWindow: builder.inWindow)
             let lists = settings.lists
             let store = self.reminderSource.store
-            let writer = TaskWriter(store: store, homeZone: .current, today: today, startOfWeek: startOfWeek,
+            var writer = TaskWriter(store: store, homeZone: .current, today: today, startOfWeek: startOfWeek,
                                     fallback: lists.first.flatMap { store.calendar(withIdentifier: $0.id) }) { category in
                 let id = lists.first { String($0.title.prefix(CategoryAppInfo.nameWidth - 1)) == category }?.id
                 return id.flatMap { store.calendar(withIdentifier: $0) }
             }
+            writer.limit = family.taskLimit
             self.twoWayRun(session, profile: profile, what: L10n.twoWayTasks, mirrorFile: "tasks-mirror.json", engine: engine,
-                           palmCategories: appInfo.categories.names, mac: builder.syncItems(reminders),
+                           palmCategories: categories.names, mac: family.limited(builder.syncItems(reminders)),
                            titleOf: { (try? PalmTask(data: $0))?.title },
                            applyMac: { plan in
                                let r = writer.apply(plan)
                                return (r.createdKeys, r.updated, r.deleted, r.failures, r.failedEntries)
                            },
                            palmDatabase: { plan in
-                               let (db, ids, _) = plan.palmDatabase(appInfo: appInfo)
-                               return (db, ids)
+                               let (db, ids, categories) = plan.palmDatabase(appInfo: garnetAppInfo)
+                               let appInfo = family.classicAppInfo(kind: .tasks, existing: appInfoData, categories: categories)
+                               return (family.deviceDatabase(db, kind: .tasks, appInfo: appInfo), ids)
                            },
                            completion: { session.runner.send("closedb") })
         }
@@ -2124,13 +2153,14 @@ final class AppState {
 
     /// Baut TasksDB-PTod aus Reminders.app und legt es in die Warteschlange.
     private func queueTasks(_ settings: TaskSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue, dryRun: Bool,
-                            dateFixYears: Int) async {
+                            dateFixYears: Int, family: PalmPIMFamily = .garnet) async {
         guard let profile = deviceManager.profile(profileId) else { return }
         do {
-            let run = try await TaskSyncRun(settings: settings, source: reminderSource, dateShift: dateFixYears)
-            let url = try syncTarget(TasksBuilder.databaseName, for: profile, dryRun: dryRun)
+            let run = try await TaskSyncRun(settings: settings, source: reminderSource, dateShift: dateFixYears, family: family)
+            let name = family.databaseName(.tasks)
+            let url = try syncTarget(name, for: profile, dryRun: dryRun)
             let bytes = try writeDatabase(run.database, to: url)
-            if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(TasksBuilder.databaseName, run.report.records, bytes)); return }
+            if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(name, run.report.records, bytes)); return }
             queue.refresh()
             tabLog(tabId, L10n.logTasksQueued(run.report.records, run.report.completedSkipped, bytes))
             for warning in run.report.warnings { tabLog(tabId, L10n.logTasksWarning(warning)) }
@@ -2143,13 +2173,14 @@ final class AppState {
 
     /// Baut ContactsDB-PAdd aus Contacts.app und legt es in die Warteschlange.
     private func queueContacts(_ settings: ContactSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue, dryRun: Bool,
-                               dateFixYears: Int) {
+                               dateFixYears: Int, family: PalmPIMFamily = .garnet) {
         guard let profile = deviceManager.profile(profileId) else { return }
         do {
-            let run = try ContactSyncRun(settings: settings, source: contactSource, dateShift: dateFixYears)
-            let url = try syncTarget(ContactsBuilder.databaseName, for: profile, dryRun: dryRun)
+            let run = try ContactSyncRun(settings: settings, source: contactSource, dateShift: dateFixYears, family: family)
+            let name = family.databaseName(.contacts)
+            let url = try syncTarget(name, for: profile, dryRun: dryRun)
             let bytes = try writeDatabase(run.database, to: url)
-            if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(ContactsBuilder.databaseName, run.report.records, bytes)); return }
+            if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(name, run.report.records, bytes)); return }
             queue.refresh()
             tabLog(tabId, L10n.logContactsQueued(run.report.records, run.report.categories.count - 1, bytes))
             for warning in run.report.warnings { tabLog(tabId, L10n.logContactsWarning(warning)) }
