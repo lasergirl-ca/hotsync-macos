@@ -187,7 +187,7 @@ public struct CalendarSyncRun {
     }
 
     public init(settings: CalendarSyncSettings, source: CalendarSource, homeZone: TimeZone = .current, now: Date = Date(),
-                dateShift: Int = 0) throws {
+                dateShift: Int = 0, family: PalmPIMFamily = .garnet) throws {
         guard source.hasAccess else { throw Failure.noAccess }
         let calendar = Foundation.Calendar.current
         let today = calendar.startOfDay(for: now)
@@ -198,13 +198,19 @@ public struct CalendarSyncRun {
         let builder = CalendarBuilder(options: .init(
             homeZone: homeZone, windowStart: windowStart, windowEnd: windowEnd, calendars: settings.macCalendars,
             startOfWeek: calendar.firstWeekday == 2 ? 1 : 0, dateShift: dateShift))
-        (database, report) = builder.build(events)
+        let (built, builtReport) = builder.build(events)
+        report = builtReport
+        // a classic Palm (Datebook) gets the same records without what it cannot hold
+        let categories = (try? CalendarAppInfo(data: built.appInfo ?? Data()))?.categories ?? CategoryAppInfo()
+        database = family.deviceDatabase(built, kind: .calendar,
+                                         appInfo: family.classicAppInfo(kind: .calendar, existing: nil, categories: categories,
+                                                                        startOfWeek: builder.options.startOfWeek))
 
         // what was built must read back as it was meant, before it goes near a Palm
         let image = database.encode()
         guard let check = try? PalmDatabase(data: image), check == database,
-              check.records.allSatisfy({ (try? CalendarEvent(data: $0.data))?.encode() == $0.data }),
-              let appInfo = check.appInfo, (try? CalendarAppInfo(data: appInfo)) != nil else {
+              check.records.allSatisfy({ family.readsBack($0.data, kind: .calendar) }),
+              let appInfo = check.appInfo, family.categories(ofAppInfo: appInfo, kind: .calendar) != nil else {
             throw Failure.doesNotReadBack
         }
     }

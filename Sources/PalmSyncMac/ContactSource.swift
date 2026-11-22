@@ -167,18 +167,22 @@ public struct ContactSyncRun {
         case doesNotReadBack
     }
 
-    public init(settings: ContactSyncSettings, source: ContactSource, dateShift: Int = 0) throws {
+    public init(settings: ContactSyncSettings, source: ContactSource, dateShift: Int = 0, family: PalmPIMFamily = .garnet) throws {
         guard source.hasAccess else { throw Failure.noAccess }
         let macContacts = try source.contacts(in: settings.containers.map(\.id))
         contacts = macContacts.count
         let builder = ContactsBuilder(options: .init(containers: settings.containers.map { .init(id: $0.id, title: $0.title) },
                                                      dateShift: dateShift))
-        (database, report) = builder.build(macContacts)
+        let (built, builtReport) = builder.build(macContacts)
+        report = builtReport
+        let categories = (try? ContactAppInfo(data: built.appInfo ?? Data()))?.categories ?? CategoryAppInfo()
+        database = family.deviceDatabase(built, kind: .contacts,
+                                         appInfo: family.classicAppInfo(kind: .contacts, existing: nil, categories: categories))
 
         let image = database.encode()
         guard let check = try? PalmDatabase(data: image), check == database,
-              check.records.allSatisfy({ (try? Contact(data: $0.data))?.encode() == $0.data }),
-              let appInfo = check.appInfo, (try? ContactAppInfo(data: appInfo)) != nil else {
+              check.records.allSatisfy({ family.readsBack($0.data, kind: .contacts) }),
+              let appInfo = check.appInfo, family.categories(ofAppInfo: appInfo, kind: .contacts) != nil else {
             throw Failure.doesNotReadBack
         }
     }

@@ -150,7 +150,7 @@ public struct TaskSyncRun {
     }
 
     public init(settings: TaskSyncSettings, source: ReminderSource, homeZone: TimeZone = .current, now: Date = Date(),
-                dateShift: Int = 0) async throws {
+                dateShift: Int = 0, family: PalmPIMFamily = .garnet) async throws {
         guard source.hasAccess else { throw Failure.noAccess }
         let found = try await source.reminders(in: settings.lists.map(\.id), homeZone: homeZone)
         reminders = found.count
@@ -161,12 +161,16 @@ public struct TaskSyncRun {
                                                   keepCompletedDays: settings.keepCompletedDays, today: today,
                                                   startOfWeek: Foundation.Calendar.current.firstWeekday == 2 ? 1 : 0,
                                                   dateShift: dateShift))
-        (database, report) = builder.build(found)
+        let (built, builtReport) = builder.build(found)
+        report = builtReport
+        let categories = (try? TaskAppInfo(data: built.appInfo ?? Data()))?.categories ?? CategoryAppInfo()
+        database = family.deviceDatabase(built, kind: .tasks,
+                                         appInfo: family.classicAppInfo(kind: .tasks, existing: nil, categories: categories))
 
         let image = database.encode()
         guard let check = try? PalmDatabase(data: image), check == database,
-              check.records.allSatisfy({ (try? PalmTask(data: $0.data))?.encode() == $0.data }),
-              let appInfo = check.appInfo, (try? TaskAppInfo(data: appInfo)) != nil else {
+              check.records.allSatisfy({ family.readsBack($0.data, kind: .tasks) }),
+              let appInfo = check.appInfo, family.categories(ofAppInfo: appInfo, kind: .tasks) != nil else {
             throw Failure.doesNotReadBack
         }
     }
