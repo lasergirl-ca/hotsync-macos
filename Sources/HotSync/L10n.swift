@@ -543,9 +543,13 @@ enum L10n {
         "\(records) Einträge beim nächsten HotSync (\(series) Serien, \(expanded) aufgelöst)",
         "\(records) records at the next HotSync (\(series) series, \(expanded) expanded)"
     ) }
-    static func logCalendarQueued(_ records: Int, _ series: Int, _ bytes: Int) -> String { s(
-        "Kalender gebaut: \(records) Einträge (\(series) Serien), CalendarDB-PDat.pdb (\(bytes) Bytes) in der Warteschlange",
-        "Calendar built: \(records) records (\(series) series), CalendarDB-PDat.pdb (\(bytes) bytes) queued"
+    static func logCalendarQueued(_ records: Int, _ series: Int, _ name: String, _ bytes: Int) -> String { s(
+        "Kalender gebaut: \(records) Einträge (\(series) Serien), \(name).pdb (\(bytes) Bytes) in der Warteschlange",
+        "Calendar built: \(records) records (\(series) series), \(name).pdb (\(bytes) bytes) queued"
+    ) }
+    static func logNothingChosen(_ what: String, _ name: String) -> String { s(
+        "\(what): nichts auf dem Mac gewählt, \(name) auf dem Palm bleibt (einseitig hieße ersetzen)",
+        "\(what): nothing chosen on the Mac, \(name) on the Palm stays (one-way would replace it)"
     ) }
     static func logCalendarWarning(_ text: String) -> String { s("Kalender: \(text)", "Calendar: \(text)") }
     static var logCalendarNeedsBackup: String { s(
@@ -757,9 +761,9 @@ enum L10n {
         "\(records) Aufgaben beim nächsten HotSync (\(categories) Kategorien, \(skipped) alte erledigte weggelassen)",
         "\(records) tasks at the next HotSync (\(categories) categories, \(skipped) old completed ones left out)"
     ) }
-    static func logTasksQueued(_ records: Int, _ skipped: Int, _ bytes: Int) -> String { s(
-        "Aufgaben gebaut: \(records) Einträge (\(skipped) alte erledigte weggelassen), TasksDB-PTod.pdb (\(bytes) Bytes) in der Warteschlange",
-        "Tasks built: \(records) records (\(skipped) old completed ones left out), TasksDB-PTod.pdb (\(bytes) bytes) queued"
+    static func logTasksQueued(_ records: Int, _ skipped: Int, _ name: String, _ bytes: Int) -> String { s(
+        "Aufgaben gebaut: \(records) Einträge (\(skipped) alte erledigte weggelassen), \(name).pdb (\(bytes) Bytes) in der Warteschlange",
+        "Tasks built: \(records) records (\(skipped) old completed ones left out), \(name).pdb (\(bytes) bytes) queued"
     ) }
     static func logTasksWarning(_ text: String) -> String { s("Aufgaben: \(text)", "Tasks: \(text)") }
     static var logTasksNoAccess: String { s(
@@ -856,9 +860,9 @@ enum L10n {
         "\(records) Kontakte beim nächsten HotSync (\(categories) Kategorien, \(duplicates) doppelte weggelassen)",
         "\(records) contacts at the next HotSync (\(categories) categories, \(duplicates) duplicates dropped)"
     ) }
-    static func logContactsQueued(_ records: Int, _ categories: Int, _ bytes: Int) -> String { s(
-        "Kontakte gebaut: \(records) Einträge (\(categories) Kategorien), ContactsDB-PAdd.pdb (\(bytes) Bytes) in der Warteschlange",
-        "Contacts built: \(records) records (\(categories) categories), ContactsDB-PAdd.pdb (\(bytes) bytes) queued"
+    static func logContactsQueued(_ records: Int, _ categories: Int, _ name: String, _ bytes: Int) -> String { s(
+        "Kontakte gebaut: \(records) Einträge (\(categories) Kategorien), \(name).pdb (\(bytes) Bytes) in der Warteschlange",
+        "Contacts built: \(records) records (\(categories) categories), \(name).pdb (\(bytes) bytes) queued"
     ) }
     static func logContactsWarning(_ text: String) -> String { s("Kontakte: \(text)", "Contacts: \(text)") }
     static var logContactsNoAccess: String { s(

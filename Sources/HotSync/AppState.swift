@@ -1334,6 +1334,10 @@ final class AppState {
                     // nach der Sicherung: Palm lesen, zusammenführen, dann schreiben
                     session.twoWayDatabases.append(family.databaseName(.calendar))
                     tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayCalendar))
+                } else if settings.calendars.isEmpty {
+                    // einseitig heißt ersetzen: ohne gewählten Kalender wäre
+                    // der Palm danach leer
+                    tabLog(tabId, L10n.logNothingChosen(L10n.twoWayCalendar, family.databaseName(.calendar)))
                 } else {
                     queueCalendar(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears,
                                   family: family)
@@ -1346,6 +1350,8 @@ final class AppState {
                 } else if profile.isContactTwoWay {
                     session.twoWayDatabases.append(family.databaseName(.contacts))
                     tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayContacts))
+                } else if settings.containers.isEmpty {
+                    tabLog(tabId, L10n.logNothingChosen(L10n.twoWayContacts, family.databaseName(.contacts)))
                 } else {
                     queueContacts(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears,
                                   family: family)
@@ -1358,6 +1364,8 @@ final class AppState {
                 } else if profile.isTaskTwoWay {
                     session.twoWayDatabases.append(family.databaseName(.tasks))
                     tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayTasks))
+                } else if settings.lists.isEmpty {
+                    tabLog(tabId, L10n.logNothingChosen(L10n.twoWayTasks, family.databaseName(.tasks)))
                 } else {
                     if !dry { session.checkDatabases.append(family.databaseName(.tasks)) }
                     // Reminders liefert asynchron; der Palm wartet solange (Lebenszeichen)
@@ -1495,7 +1503,7 @@ final class AppState {
             let bytes = try writeDatabase(run.database, to: url)
             if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(name, run.report.records, bytes)); return }
             queue.refresh()
-            tabLog(tabId, L10n.logCalendarQueued(run.report.records, run.report.seriesMapped, bytes))
+            tabLog(tabId, L10n.logCalendarQueued(run.report.records, run.report.seriesMapped, name, bytes))
             for warning in run.report.warnings { tabLog(tabId, L10n.logCalendarWarning(warning)) }
         } catch CalendarSyncRun.Failure.noAccess {
             tabLog(tabId, L10n.logCalendarNoAccess)
@@ -2133,7 +2141,7 @@ final class AppState {
             let bytes = try writeDatabase(run.database, to: url)
             if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(name, run.report.records, bytes)); return }
             queue.refresh()
-            tabLog(tabId, L10n.logTasksQueued(run.report.records, run.report.completedSkipped, bytes))
+            tabLog(tabId, L10n.logTasksQueued(run.report.records, run.report.completedSkipped, name, bytes))
             for warning in run.report.warnings { tabLog(tabId, L10n.logTasksWarning(warning)) }
         } catch TaskSyncRun.Failure.noAccess {
             tabLog(tabId, L10n.logTasksNoAccess)
@@ -2153,7 +2161,7 @@ final class AppState {
             let bytes = try writeDatabase(run.database, to: url)
             if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(name, run.report.records, bytes)); return }
             queue.refresh()
-            tabLog(tabId, L10n.logContactsQueued(run.report.records, run.report.categories.count - 1, bytes))
+            tabLog(tabId, L10n.logContactsQueued(run.report.records, run.report.categories.count - 1, name, bytes))
             for warning in run.report.warnings { tabLog(tabId, L10n.logContactsWarning(warning)) }
         } catch ContactSyncRun.Failure.noAccess {
             tabLog(tabId, L10n.logContactsNoAccess)
