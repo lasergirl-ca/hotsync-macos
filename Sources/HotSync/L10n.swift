@@ -682,12 +682,12 @@ enum L10n {
         "Auch abgleichen, wenn zuletzt der Cradle abgeglichen hat", "Sync even when Cradle synced last"
     ) }
     static var cradleHint: String { s(
-        "Auf diesem Palm ist CradleSync: ein Cradle-Server gleicht Kalender, Kontakte und Aufgaben ebenfalls ab. Zwei Rechner am selben Palm lassen gelöschte Einträge über den jeweils anderen Weg wieder auftauchen, und jeder Wechsel kostet beide einen vollständigen Abgleich. Aus: hat zuletzt der Cradle abgeglichen, lässt der HotSync diese drei Abgleiche aus; Sicherung, Installation, Uhr und Zeitzonen laufen.",
-        "CradleSync is on this Palm: a Cradle server syncs its calendar, contacts and tasks too. Two desktops on one Palm bring deleted items back through the other path, and every switch costs both a full sync. Off: when Cradle synced last, this HotSync leaves those three syncs out; backup, install, clock and time zones still run."
+        "Auf diesem Palm ist CradleSync: ein Cradle-Server gleicht Kalender, Kontakte und Aufgaben ebenfalls ab (die Memos nehmen denselben Weg). Zwei Rechner am selben Palm lassen gelöschte Einträge über den jeweils anderen Weg wieder auftauchen, und jeder Wechsel kostet beide einen vollständigen Abgleich. Aus: hat zuletzt der Cradle abgeglichen, lässt der HotSync Kalender, Kontakte, Aufgaben und Memos aus; Sicherung, Installation, Uhr und Zeitzonen laufen.",
+        "CradleSync is on this Palm: a Cradle server syncs its calendar, contacts and tasks too (memos go the same way). Two desktops on one Palm bring deleted items back through the other path, and every switch costs both a full sync. Off: when Cradle synced last, this HotSync leaves calendar, contacts, tasks and memos out; backup, install, clock and time zones still run."
     ) }
     static func logCradleSkipped(_ pc: UInt32) -> String { s(
-        "CradleSync ist auf dem Palm und zuletzt hat der Cradle abgeglichen (PC \(pc)): Kalender, Kontakte und Aufgaben ausgelassen – „Auch abgleichen, wenn zuletzt der Cradle abgeglichen hat“ einschalten, wenn beide sollen",
-        "CradleSync is on the Palm and Cradle synced last (PC \(pc)): calendar, contacts and tasks left out – turn on “Sync even when Cradle synced last” if both should sync"
+        "CradleSync ist auf dem Palm und zuletzt hat der Cradle abgeglichen (PC \(pc)): Kalender, Kontakte, Aufgaben und Memos ausgelassen – „Auch abgleichen, wenn zuletzt der Cradle abgeglichen hat“ einschalten, wenn beide sollen",
+        "CradleSync is on the Palm and Cradle synced last (PC \(pc)): calendar, contacts, tasks and memos left out – turn on “Sync even when Cradle synced last” if both should sync"
     ) }
     static var logCradlePresent: String { s(
         "CradleSync ist auf dem Palm: ein Cradle-Server gleicht ihn auch ab", "CradleSync is on the Palm: a Cradle server syncs it too"
