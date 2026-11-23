@@ -207,7 +207,7 @@ def check_auth(result, pin, events):
     assert [(e["action"], e["code"]) for e in auth] == expected, auth
     assert auth[1]["accepted"] == 1, auth[1]
     assert auth[2]["fingerprint"] == FINGERPRINT, auth[2]
-    assert auth[4]["port"] == 14243 and auth[4]["name"] == "airlock.cradle" and auth[4]["pin"] == pin.hex(), auth[4]
+    assert auth[4]["tlsPort"] == 14243 and auth[4]["name"] == "airlock.cradle" and auth[4]["pin"] == pin.hex(), auth[4]
 
 
 def fake_airlock_auth(listener, result, pin, wrap=None):
@@ -339,7 +339,7 @@ def test_auth_tls(tool):
         proc.stdin.flush()
         assert event()["event"] == "relayKey"
         ev = event()
-        assert ev["event"] == "relayStarted" and ev["secure"] == 1 and ev["port"] == tls_port, ev
+        assert ev["event"] == "relayStarted" and ev["secure"] == 1 and ev["tlsPort"] == tls_port, ev
         while event()["event"] != "relayFinished":
             pass
         ev = events[-1]

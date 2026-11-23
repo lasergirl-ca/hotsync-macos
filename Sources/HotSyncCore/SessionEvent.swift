@@ -18,6 +18,40 @@ public struct PalmUser: Equatable, Sendable, Codable {
 }
 
 /// One line of `hotsync-session` output (a JSON object per line).
+/// One of Cradle's authenticator calls (CradleSync's actions), answered by
+/// the Mac for a Palm that cannot run CradleSync; `code` is the result code
+/// (0 ok, 7: refused on a plain session once a pin is held).
+public struct RelayAuth: Equatable, Sendable {
+    public enum Action: Int, Sendable {
+        case enrol = 1, sign = 2, info = 3, transport = 4, pair = 5, paired = 6
+    }
+    public let action: Int
+    public let code: Int
+    /// enrol: the key's fingerprint
+    public let fingerprint: String?
+    /// transport: the Secure listener's TLS port (`tlsPort` on the wire), server name and SPKI pin (hex)
+    public let port: Int?
+    public let name: String?
+    public let pin: String?
+    /// paired: whether the airlock took the pair code
+    public let accepted: Bool?
+
+    public init(action: Int, code: Int, fingerprint: String? = nil, port: Int? = nil, name: String? = nil,
+                pin: String? = nil, accepted: Bool? = nil) {
+        self.action = action
+        self.code = code
+        self.fingerprint = fingerprint
+        self.port = port
+        self.name = name
+        self.pin = pin
+        self.accepted = accepted
+    }
+
+    public var kind: Action? { Action(rawValue: action) }
+    public var ok: Bool { code == 0 }
+    public static let refusedOnPlain = 7
+}
+
 public enum SessionEvent: Equatable, Sendable {
     case listening(port: String)
     case timeout
@@ -75,8 +109,13 @@ public enum SessionEvent: Equatable, Sendable {
 
     // Relay: the session goes to a HotSync server on the network (Cradle)
 
-    /// connected to `target`, the server runs the HotSync from here on
-    case relayStarted(target: String)
+    /// connected to `target`, the server runs the HotSync from here on;
+    /// `secure`: inside TLS, to the Secure listener's port
+    case relayStarted(target: String, secure: Bool)
+    /// the Palm's Cradle key is loaded; its fingerprint as the console shows it
+    case relayKey(fingerprint: String)
+    /// the Mac answered one of Cradle's authenticator calls for the Palm
+    case relayAuth(RelayAuth)
     /// a running count: DLP requests answered so far, bytes both ways
     case relayed(packets: Int, bytes: Int)
     /// the session is over; `ended`: the server ended it with EndOfSync
@@ -119,6 +158,13 @@ public enum SessionEvent: Equatable, Sendable {
         let target: String?
         let packets: Int?
         let ended: Int?
+        let secure: Int?
+        let tlsPort: Int?
+        let fingerprint: String?
+        let action: Int?
+        let code: Int?
+        let pin: String?
+        let accepted: Int?
     }
 
     /// Reads one output line; nil for anything that is not a known event
@@ -221,7 +267,14 @@ public enum SessionEvent: Equatable, Sendable {
             guard let address = l.address else { return nil }
             return .netSyncSet(address: address, name: l.name ?? "")
         case "relayStarted":
-            return .relayStarted(target: l.target ?? "")
+            return .relayStarted(target: l.target ?? "", secure: (l.secure ?? 0) != 0)
+        case "relayKey":
+            return .relayKey(fingerprint: l.fingerprint ?? "")
+        case "relayAuth":
+            guard let action = l.action else { return nil }
+            return .relayAuth(RelayAuth(action: action, code: l.code ?? 0, fingerprint: l.fingerprint,
+                                        port: l.tlsPort, name: l.name, pin: l.pin,
+                                        accepted: l.accepted.map { $0 != 0 }))
         case "relayed":
             return .relayed(packets: l.packets ?? 0, bytes: l.bytes ?? 0)
         case "relayFinished":

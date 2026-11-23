@@ -1129,7 +1129,7 @@ static size_t relay_auth_answer(unsigned action, const uint8_t *param, size_t le
 			emit_hex("fingerprint", fp, sizeof(fp));
 		}
 		if (code == CRA_OK && action == CRA_ACTION_TRANSPORT) {
-			emit_int("port", (long)relay_auth.port);
+			emit_int("tlsPort", (long)relay_auth.port);
 			emit_str("name", relay_auth.name, 0);
 			emit_hex("pin", relay_auth.pin, sizeof(relay_auth.pin));
 		}
@@ -1493,7 +1493,7 @@ static int relay_session(int sd, const char *target)
 	emit_str("target", target, 0);
 	emit_int("secure", relay_auth.secure);
 	if (relay_auth.secure)
-		emit_int("port", (long)relay_auth.port);
+		emit_int("tlsPort", (long)relay_auth.port);
 	emit_end();
 
 	buf = pi_buffer_new(0xFFFF);

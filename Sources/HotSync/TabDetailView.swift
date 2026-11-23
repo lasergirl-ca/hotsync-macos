@@ -105,6 +105,29 @@ struct TabDetailView: View {
                     }
                     .padding(.top, 2)
                     .help(L10n.relayAddressHint)
+                    HStack(spacing: 4) {
+                        Text(L10n.relayPairLabel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField(L10n.relayPairPlaceholder, text: Binding(
+                            get: { tab.relayPairCode ?? "" },
+                            set: { appState.setRelayPairCode($0, for: tab.id) }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
+                        .frame(width: 120)
+                    }
+                    .help(L10n.relayPairHint)
+                    if let transport = tab.relayTransport {
+                        HStack(spacing: 6) {
+                            Label(L10n.relaySecureHeld(transport.port, transport.shortPin), systemImage: "lock.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Button(L10n.relayForget) { appState.forgetCradleKey(for: tab.id) }
+                                .controlSize(.mini)
+                        }
+                        .help(L10n.relaySecureHint)
+                    }
                 }
             }
 

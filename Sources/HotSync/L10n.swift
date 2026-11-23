@@ -234,6 +234,63 @@ enum L10n {
         "Adresse des Cradle-Airlocks: Host oder Host:Port (Vorgabe: Port 14238, der Netzwerk-HotSync). Der Palm am Kabel wird dort angemeldet, als käme er übers Netz.",
         "Address of the Cradle airlock: host or host:port (default: port 14238, network HotSync). The Palm on the cable shows up there as if it came over the network."
     ) }
+    static var relayPairLabel: String { s("Pair-Code:", "Pair code:") }
+    static var relayPairPlaceholder: String { "ABCD-EFGH" }
+    static var relayPairHint: String { s(
+        "Ein Pair-Code von der Cradle-Konsole (Benutzer, „Pair a Palm“), hier getippt statt in CradleSync, das dieser Palm nicht ausführen kann. Der Airlock fragt ihn beim nächsten HotSync ab; danach ist er vergessen.",
+        "A pair code from the Cradle console (Users, “Pair a Palm”), typed here instead of into CradleSync, which this Palm cannot run. The airlock asks for it at the next HotSync; after that it is forgotten."
+    ) }
+    static func relaySecureHeld(_ port: Int, _ pin: String) -> String { s(
+        "Secure: TLS-Port \(port), Pin \(pin)…", "Secure: TLS port \(port), pin \(pin)…"
+    ) }
+    static var relaySecureHint: String { s(
+        "Cradle hat seinen Secure-Transport ausgegeben: der HotSync geht über TLS an diesen Port, der Server ist am Pin erkannt. Unverschlüsselt geht nichts mehr – „Vergessen“ setzt den Palm zurück, dann meldet der nächste HotSync einen neuen Schlüssel an (den Cradle erst nimmt, wenn der Authenticator des Palms in der Konsole zurückgesetzt wurde).",
+        "Cradle issued its Secure transport: the HotSync goes over TLS to this port, the server known by the pin. Nothing goes plainly any more – “Forget” resets the Palm, and the next HotSync enrols a new key (which Cradle takes only once the Palm's authenticator is reset in the console)."
+    ) }
+    static var relayForget: String { s("Vergessen", "Forget") }
+    static func logRelayKey(_ fingerprint: String) -> String { s(
+        "Cradle-Schlüssel dieses Palms: \(fingerprint) (im Schlüsselbund dieses Macs)",
+        "This Palm's Cradle key: \(fingerprint) (in this Mac's Keychain)"
+    ) }
+    static var logRelayNoKeychain: String { s(
+        "Der Schlüsselbund gibt keinen Cradle-Schlüssel her – HotSync beendet",
+        "The Keychain would not give a Cradle key – HotSync ended"
+    ) }
+    static func logRelaySecure(_ port: Int) -> String { s(
+        "Secure: Verbindung über TLS an Port \(port)", "Secure: connecting over TLS to port \(port)"
+    ) }
+    static func logRelayStartedSecure(_ target: String) -> String { s(
+        "Verbunden mit \(target) über TLS – Cradle führt den HotSync", "Connected to \(target) over TLS – Cradle runs the HotSync"
+    ) }
+    static func logRelayEnrolled(_ fingerprint: String) -> String { s(
+        "Schlüssel \(fingerprint) bei Cradle angemeldet – der Mac bürgt für diesen Palm",
+        "Key \(fingerprint) enrolled with Cradle – this Mac vouches for the Palm"
+    ) }
+    static var logRelayProved: String { s(
+        "Cradles Challenge für den Palm beantwortet", "Answered Cradle's challenge for the Palm"
+    ) }
+    static var logRelayPlainRefused: String { s(
+        "Unverschlüsselte Sitzung, aber ein Pin ist hinterlegt: keine Unterschrift für diesen Absender",
+        "Plain session with a pin held: no signature for this asker"
+    ) }
+    static func logRelayTransport(_ port: Int, _ name: String) -> String { s(
+        "Cradle hat seinen Secure-Transport ausgegeben (\(name), TLS-Port \(port)) – der nächste HotSync geht verschlüsselt",
+        "Cradle issued its Secure transport (\(name), TLS port \(port)) – the next HotSync goes encrypted"
+    ) }
+    static var logRelayPairAsked: String { s(
+        "Cradle hat nach dem Pair-Code gefragt", "Cradle asked for the pair code"
+    ) }
+    static func logRelayPaired(_ accepted: Bool) -> String {
+        accepted
+            ? s("Cradle hat den Pair-Code angenommen – der Palm ist gepaart", "Cradle took the pair code – the Palm is paired")
+            : s("Cradle hat den Pair-Code nicht angenommen", "Cradle did not take the pair code")
+    }
+    static func logRelayAuthRefused(_ action: Int, _ code: Int) -> String { s(
+        "Authenticator-Aufruf \(action) abgelehnt (Code \(code))", "Authenticator call \(action) refused (code \(code))"
+    ) }
+    static var logRelayForgotten: String { s(
+        "Cradle-Schlüssel und Secure-Transport vergessen", "Cradle key and Secure transport forgotten"
+    ) }
     static func allTabsMode(_ mode: HotSyncMode) -> String {
         s("Alle Tabs: \(modeName(mode))", "All Tabs: \(modeName(mode))")
     }

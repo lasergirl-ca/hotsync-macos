@@ -393,6 +393,33 @@ final class AppState {
         saveTab(tab)
     }
 
+    func setRelayPairCode(_ code: String, for tabId: UUID) {
+        guard var tab = tabStore.tab(tabId) else { return }
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value: String? = trimmed.isEmpty ? nil : trimmed
+        guard tab.relayPairCode != value else { return }
+        tab.relayPairCode = value
+        saveTab(tab)
+    }
+
+    private func setRelayTransport(_ transport: RelayTransport?, for tabId: UUID) {
+        guard var tab = tabStore.tab(tabId), tab.relayTransport != transport else { return }
+        tab.relayTransport = transport
+        saveTab(tab)
+    }
+
+    /// Vergisst den Cradle-Schlüssel des Palms und den Secure-Transport: der
+    /// nächste HotSync geht wieder unverschlüsselt an die Adresse und meldet
+    /// einen neuen Schlüssel an.
+    func forgetCradleKey(for tabId: UUID) {
+        guard let tab = tabStore.tab(tabId) else { return }
+        if let profile = deviceManager.profile(tab.profileId), profile.isBound {
+            CradleKeyStore.forget(for: UInt32(truncatingIfNeeded: profile.userId))
+        }
+        setRelayTransport(nil, for: tabId)
+        tabLog(tabId, L10n.logRelayForgotten)
+    }
+
     func setModeForAllTabs(_ mode: HotSyncMode) {
         for var tab in tabStore.tabs where tab.hotSyncMode != mode {
             tab.hotSyncMode = mode
@@ -995,9 +1022,40 @@ final class AppState {
             break
 
         // über Cradle: nur mitzählen; das Werkzeug beendet sich von selbst
-        case .relayStarted(let target):
+        case .relayStarted(let target, let secure):
             session.relayStarted = true
-            if let tabId = session.tabId { tabLog(tabId, L10n.logRelayStarted(target)) }
+            if let tabId = session.tabId {
+                tabLog(tabId, secure ? L10n.logRelayStartedSecure(target) : L10n.logRelayStarted(target))
+            }
+
+        case .relayKey(let fingerprint):
+            if let tabId = session.tabId { tabLog(tabId, L10n.logRelayKey(fingerprint)) }
+
+        // der Mac hat einen Authenticator-Aufruf für den Palm beantwortet
+        case .relayAuth(let auth):
+            guard let tabId = session.tabId else { break }
+            switch (auth.kind, auth.ok) {
+            case (.enrol, true):
+                tabLog(tabId, L10n.logRelayEnrolled(auth.fingerprint ?? ""))
+            case (.sign, true):
+                tabLog(tabId, L10n.logRelayProved)
+            case (.sign, false) where auth.code == RelayAuth.refusedOnPlain:
+                tabLog(tabId, L10n.logRelayPlainRefused)
+            case (.transport, true):
+                if let port = auth.port, let name = auth.name, let pin = auth.pin {
+                    setRelayTransport(RelayTransport(port: port, name: name, pin: pin), for: tabId)
+                    tabLog(tabId, L10n.logRelayTransport(port, name))
+                }
+            case (.pair, true):
+                if tabStore.tab(tabId)?.relayPairCode != nil { tabLog(tabId, L10n.logRelayPairAsked) }
+            case (.paired, true):
+                setRelayPairCode("", for: tabId)
+                tabLog(tabId, L10n.logRelayPaired(auth.accepted ?? false))
+            case (_, false):
+                tabLog(tabId, L10n.logRelayAuthRefused(auth.action, auth.code))
+            default:
+                break
+            }
 
         case .relayed(let packets, let bytes):
             session.relayPackets = packets
@@ -1431,8 +1489,27 @@ final class AppState {
             session.runner.send("end")
             return
         }
+        // Der Palm kann CradleSync nicht ausführen: der Mac hält seinen Cradle-
+        // Schlüssel und beantwortet die Authentifizierung des Airlocks für ihn
+        guard let seed = CradleKeyStore.seed(for: user.userId, create: true) else {
+            tabLog(tabId, L10n.logRelayNoKeychain)
+            session.errorMessage = L10n.logRelayNoKeychain
+            session.runner.send("log " + L10n.palmLogNothingInstalled)
+            session.runner.send("end")
+            return
+        }
         session.stage = .relaying
         statuses[tabId]?.phase = .relaying(user: user, packets: 0)
+        session.runner.send("relaykey \(seed)")
+        let tab = tabStore.tab(tabId)
+        if let transport = tab?.relayTransport {
+            // Secure ausgegeben: ab jetzt nur noch über TLS an den Port des Transports
+            tabLog(tabId, L10n.logRelaySecure(transport.port))
+            session.runner.send("relaytls \(transport.port) \(transport.name) \(transport.pin)")
+        }
+        if let code = tab?.relayPairCode, !code.isEmpty {
+            session.runner.send("relaypair \(code)")
+        }
         tabLog(tabId, L10n.logRelayStarting(target))
         session.runner.send("relay \(target)")
     }
