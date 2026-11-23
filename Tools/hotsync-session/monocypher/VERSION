@@ -1,0 +1,9 @@
+Monocypher 4.0.2
+https://github.com/LoupVaillant/Monocypher
+Commit 0d85f98c9d9b0227e42cf795cb527dff372b40a4
+
+monocypher.c and monocypher.h (from src/), monocypher-ed25519.c and
+monocypher-ed25519.h (from src/optional/, for SHA-512 and Ed25519) and
+LICENCE.md (the repository root) are copied unmodified at that commit, the
+same files Cradle's Palm authenticator is built from. hotsync-session uses
+them to keep and answer for a Palm's Cradle key (the "relay" command).

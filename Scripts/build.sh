@@ -111,9 +111,14 @@ echo "[4/6] Baue hotsync-session und bette es ein..."
 # .build/apple/..., und clang braucht es für die Zwischendateien eines Universal-Builds.
 mkdir -p "$(dirname "$SESSION_TOOL")"
 # shellcheck disable=SC2086
+# Monocypher (Tools/hotsync-session/monocypher) signs for a Palm that cannot carry a Cradle key;
+# Network und Security tragen das TLS zum Airlock (beides nur für "relay").
+TOOL_SRC="$PROJECT_DIR/Tools/hotsync-session"
 clang -std=c99 -Wall -Wextra -Werror -O2 $ARCH_FLAGS \
     -I"$PILOT_PREFIX/include" -L"$PILOT_PREFIX/lib" -lpisock \
-    -o "$SESSION_TOOL" "$PROJECT_DIR/Tools/hotsync-session/hotsync-session.c"
+    -framework Network -framework Security -framework CoreFoundation \
+    -o "$SESSION_TOOL" "$TOOL_SRC/hotsync-session.c" \
+    "$TOOL_SRC/monocypher/monocypher.c" "$TOOL_SRC/monocypher/monocypher-ed25519.c"
 echo "      hotsync-session gebaut"
 FRAMEWORKS="$APP_BUNDLE/Contents/Frameworks"
 mkdir -p "$FRAMEWORKS"

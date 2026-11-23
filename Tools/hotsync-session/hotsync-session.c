@@ -40,6 +40,9 @@
  *             syncinfo <PC-ID>        lastSyncPC und Abgleichzeit im Palm setzen
  *             settime                 die Uhr des Palms auf die des Macs stellen
  *             end              Sitzung sauber beenden
+ *           Relay (see "Relay" below): relay HOST[:PORT] hands the session to
+ *           a network HotSync server; relaykey, relaytls and relaypair before
+ *           it let the Mac answer Cradle's authenticator for the Palm.
  *
  * Exit:     0 Sitzung beendet, 1 Fehler, 2 kein Palm innerhalb des Timeouts
  */
@@ -59,7 +62,12 @@
 #include <time.h>
 #include <utime.h>
 #include <unistd.h>
+#include <stdint.h>
 #include <sys/socket.h>
+#include <dispatch/dispatch.h>
+#include <CommonCrypto/CommonDigest.h>
+#include <Network/Network.h>
+#include <Security/Security.h>
 
 #include "pi-dlp.h"
 #include "pi-file.h"
@@ -67,6 +75,9 @@
 #include "pi-source.h"
 #include "pi-net.h"
 #include "pi-syspkt.h"
+
+#include "monocypher/monocypher.h"
+#include "monocypher/monocypher-ed25519.h"
 
 /* libpisock exports it (pi_bind() and pi_accept() call it) but no header
  * declares it: builds the protocol stack of a socket whose descriptor was
@@ -669,15 +680,13 @@ static void get_rom(int sd, const char *dir)
  * EndOfSync from the server (or the link is gone) - main() sends none */
 static int session_relayed = 0;
 
-/* Opens the TCP connection: "host", "host:port" or "[v6]:port". */
-static int relay_connect(const char *target)
+/* Splits "host", "host:port" or "[v6]:port"; the port defaults to 14238. */
+static int relay_parse_target(const char *target, char host[256], char service[16])
 {
-	char host[256], service[16] = "14238";
 	const char *colon, *end;
-	struct addrinfo hints, *res, *ai;
-	int fd = -1, err;
 	size_t len;
 
+	strcpy(service, "14238");
 	if (target[0] == '[' && (end = strchr(target, ']')) != NULL) {
 		len = (size_t)(end - target - 1);
 		colon = end[1] == ':' ? end + 1 : NULL;
@@ -686,19 +695,27 @@ static int relay_connect(const char *target)
 		colon = strrchr(target, ':');
 		len = colon ? (size_t)(colon - target) : strlen(target);
 	}
-	if (len == 0 || len >= sizeof(host)) {
+	if (len == 0 || len >= 256) {
 		emit_error("relay", "usage: relay HOST[:PORT]");
-		return -1;
+		return 0;
 	}
 	memcpy(host, target, len);
 	host[len] = '\0';
 	if (colon != NULL) {
-		if (colon[1] == '\0' || strlen(colon + 1) >= sizeof(service)) {
+		if (colon[1] == '\0' || strlen(colon + 1) >= 16) {
 			emit_error("relay", "usage: relay HOST[:PORT]");
-			return -1;
+			return 0;
 		}
 		strcpy(service, colon + 1);
 	}
+	return 1;
+}
+
+/* Opens the plain TCP connection. */
+static int relay_connect(const char *host, const char *service)
+{
+	struct addrinfo hints, *res, *ai;
+	int fd = -1, err;
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;
@@ -820,6 +837,623 @@ static int relay_wait(int sd, int netfd)
 	}
 }
 
+/* ---- Relay: the Mac answers Cradle's authenticator for the Palm --------- */
+
+/* Cradle's airlock lets a Palm in only when it proves itself: on first
+ * contact it asks the Palm, through DLP CallApplication for CradleSync
+ * (creator CrSy), to make an Ed25519 key and keep the public half; every
+ * later session starts with a challenge the Palm signs (Cradle's
+ * docs/device-auth.md). A Palm OS 3 or 4 device cannot run CradleSync, so
+ * for it the Mac answers those calls here, with a key the app keeps per
+ * Palm in the Keychain and hands over with "relaykey". To the airlock that
+ * is a Palm with an authenticator like any other; the key says "this
+ * Palm's HotSync came through that Mac", which is as much as a device with
+ * no place for a key can be made to say.
+ *
+ *   relaykey HEX           the Palm's Ed25519 seed (32 bytes, hex)
+ *   relaytls PORT NAME PIN the Secure transport record the airlock issued
+ *                          (TLS port, server name, SPKI pin as hex): with
+ *                          it "relay" comes in over TLS to that port
+ *   relaypair CODE         a pair code typed on the Mac (action 5)
+ *
+ * Calls answered (the wire format is CradleSync's, palm/sync/auth/auth.h):
+ *   1 enrol      32 bytes of entropy -> CRA1 + public key
+ *   2 sign       CRA1 + nonce + user ID + PC ID (44 bytes) -> signature
+ *   3 info       -> CRA1 + version + key fingerprint
+ *   4 transport  CRA1 + port + name + pin -> CRA1; reported as relayAuth
+ *   5 pair       -> CRA1 + the pair code, CRA1 alone without one
+ *   6 paired     CRA1 + accepted -> CRA1; the code is forgotten
+ * Unlike CradleSync, enrol with a key already made answers with that key:
+ * the key is the Mac's to show, and a device record reset in the console
+ * must be able to enrol it again without a reset here.
+ *
+ * As CradleSync from build 138: once the transport record is held, a
+ * plain session gets no signature (CRA_ERR_PLAIN, 7) and no new record,
+ * because whoever answers at the plain port could be anyone. The app
+ * never relays plainly with a record held; the refusal is for a tool
+ * driven by hand. */
+
+#define CRA_ACTION_ENROL     1
+#define CRA_ACTION_SIGN      2
+#define CRA_ACTION_INFO      3
+#define CRA_ACTION_TRANSPORT 4
+#define CRA_ACTION_PAIR      5
+#define CRA_ACTION_PAIRED    6
+#define CRA_OK          0
+#define CRA_ERR_PARAM   1
+#define CRA_ERR_NO_KEY  3
+#define CRA_ERR_PLAIN   7
+#define CRA_VERSION     1
+#define CRA_PAIR_MAX    16
+#define CRA_SIGN_PARAM_LEN 44
+#define CRA_TRANSPORT_MIN (4 + 2 + 1 + 32)
+
+static struct {
+	int has_key;
+	uint8_t secret[64];	/* Monocypher's expanded secret key */
+	uint8_t public[32];
+	int has_transport;
+	unsigned port;
+	char name[64];
+	uint8_t pin[32];
+	char pair[CRA_PAIR_MAX + 1];
+	int secure;		/* this relay runs inside TLS */
+} relay_auth;
+
+static int hex_nibble(char c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F')
+		return c - 'A' + 10;
+	return -1;
+}
+
+/* Decodes exactly `len` bytes of hex; 0 on anything else. */
+static int hex_decode(const char *hex, uint8_t *out, size_t len)
+{
+	size_t i;
+
+	for (i = 0; i < len; i++) {
+		int hi = hex_nibble(hex[2 * i]), lo = hex[2 * i] ? hex_nibble(hex[2 * i + 1]) : -1;
+		if (hi < 0 || lo < 0)
+			return 0;
+		out[i] = (uint8_t)(hi << 4 | lo);
+	}
+	return hex[2 * len] == '\0';
+}
+
+static void emit_hex(const char *key, const uint8_t *data, size_t len)
+{
+	static const char digits[] = "0123456789abcdef";
+	size_t i;
+
+	printf(",\"%s\":\"", key);
+	for (i = 0; i < len; i++) {
+		putchar(digits[data[i] >> 4]);
+		putchar(digits[data[i] & 0xF]);
+	}
+	putchar('"');
+}
+
+/* The fingerprint the console and CradleSync show: SHA-512 of the public
+ * key, first 8 bytes. */
+static void relay_fingerprint(uint8_t fp[8])
+{
+	uint8_t hash[64];
+
+	crypto_sha512(hash, relay_auth.public, 32);
+	memcpy(fp, hash, 8);
+	crypto_wipe(hash, sizeof(hash));
+}
+
+/* "relaykey HEX": the seed; the public key follows from it. */
+static void relay_set_key(const char *hex)
+{
+	uint8_t seed[32], fp[8];
+
+	if (!hex_decode(hex, seed, sizeof(seed))) {
+		emit_error("relay", "usage: relaykey <64 hex digits>");
+		return;
+	}
+	crypto_ed25519_key_pair(relay_auth.secret, relay_auth.public, seed);	/* wipes seed */
+	relay_auth.has_key = 1;
+	relay_fingerprint(fp);
+	emit_begin("relayKey");
+	emit_hex("fingerprint", fp, sizeof(fp));
+	emit_end();
+}
+
+/* "relaytls PORT NAME PINHEX": the Secure transport record. */
+static void relay_set_transport(const char *args)
+{
+	char name[64], pin[80];
+	unsigned port;
+
+	if (sscanf(args, "%u %63s %79s", &port, name, pin) != 3 || port == 0 || port > 65535
+	    || !hex_decode(pin, relay_auth.pin, sizeof(relay_auth.pin))) {
+		emit_error("relay", "usage: relaytls <port> <server name> <64 hex digits>");
+		return;
+	}
+	relay_auth.port = port;
+	strcpy(relay_auth.name, name);
+	relay_auth.has_transport = 1;
+}
+
+/* "relaypair CODE": what the user typed; "relaypair" alone forgets it. */
+static void relay_set_pair(const char *code)
+{
+	size_t len = strcspn(code, " \t");
+
+	if (len > CRA_PAIR_MAX) {
+		emit_error("relay", "the pair code is longer than %d characters", CRA_PAIR_MAX);
+		return;
+	}
+	memcpy(relay_auth.pair, code, len);
+	relay_auth.pair[len] = '\0';
+}
+
+static int has_magic(const uint8_t *p)
+{
+	return p[0] == 'C' && p[1] == 'R' && p[2] == 'A' && p[3] == '1';
+}
+
+static void put_magic(uint8_t *p)
+{
+	p[0] = 'C'; p[1] = 'R'; p[2] = 'A'; p[3] = '1';
+}
+
+/* Is this request a CallApplication for CradleSync? Sets *action, *param
+ * and *len when it is (the Palm OS 2.0+ encoding libpisock sends: one
+ * argument, creator, type, action, parameter length, two reserved longs,
+ * the parameter). Anything else goes to the Palm. */
+static int relay_auth_request(const uint8_t *req, size_t n, unsigned *action, const uint8_t **param, size_t *len)
+{
+	const uint8_t *arg;
+	size_t arglen;
+
+	if (n < 4 || req[0] != dlpFuncCallApplication || req[1] != 1)
+		return 0;
+	if (req[2] & PI_DLP_ARG_FLAG_LONG) {
+		if (n < 8)
+			return 0;
+		arglen = get_long(req + 4);
+		arg = req + 8;
+	} else if (req[2] & PI_DLP_ARG_FLAG_SHORT) {
+		if (n < 6)
+			return 0;
+		arglen = get_short(req + 4);
+		arg = req + 6;
+	} else {
+		arglen = req[3];
+		arg = req + 4;
+	}
+	if (arglen < 22 || (size_t)(arg - req) + arglen > n)
+		return 0;
+	if (memcmp(arg, "CrSy", 4) != 0 || memcmp(arg + 4, "appl", 4) != 0)
+		return 0;
+	*action = get_short(arg + 8);
+	*len = get_long(arg + 10);
+	if (*len > arglen - 22)
+		*len = arglen - 22;
+	*param = arg + 22;
+	return 1;
+}
+
+/* Answers one call. The reply is a DLP response as the Palm would send
+ * it: function | 0x80, one argument, no error, then the argument (result
+ * code, result size, two reserved longs, the result). Returns its length. */
+static size_t relay_auth_answer(unsigned action, const uint8_t *param, size_t len, uint8_t *reply)
+{
+	uint8_t result[80], fp[8];
+	size_t n = 0;
+	unsigned code = CRA_OK;
+	/* a plain session with a pin held: the asker is whoever answered at
+	 * the server's address */
+	int kept = relay_auth.has_transport && !relay_auth.secure;
+	int report = 1;
+
+	switch (action) {
+	case CRA_ACTION_ENROL:
+		if (len != 32) {
+			code = CRA_ERR_PARAM;
+		} else {
+			put_magic(result);
+			memcpy(result + 4, relay_auth.public, 32);
+			n = 36;
+		}
+		break;
+	case CRA_ACTION_SIGN:
+		if (len != CRA_SIGN_PARAM_LEN || !has_magic(param))
+			code = CRA_ERR_PARAM;
+		else if (kept)
+			code = CRA_ERR_PLAIN;
+		else {
+			crypto_ed25519_sign(result, relay_auth.secret, param, len);
+			n = 64;
+		}
+		break;
+	case CRA_ACTION_INFO:
+		put_magic(result);
+		set_short(result + 4, CRA_VERSION);
+		relay_fingerprint(result + 6);
+		n = 14;
+		report = 0;
+		break;
+	case CRA_ACTION_TRANSPORT:
+		if (len < CRA_TRANSPORT_MIN || !has_magic(param) || param[6] > 63 || 4 + 3 + (size_t)param[6] + 32 != len) {
+			code = CRA_ERR_PARAM;
+		} else if (kept && (get_short(param + 4) != relay_auth.port || param[6] != strlen(relay_auth.name)
+			    || memcmp(param + 7, relay_auth.name, param[6]) != 0
+			    || memcmp(param + 7 + param[6], relay_auth.pin, 32) != 0)) {
+			code = CRA_ERR_PLAIN;
+		} else {
+			relay_auth.port = get_short(param + 4);
+			memcpy(relay_auth.name, param + 7, param[6]);
+			relay_auth.name[param[6]] = '\0';
+			memcpy(relay_auth.pin, param + 7 + param[6], 32);
+			relay_auth.has_transport = 1;
+			put_magic(result);
+			n = 4;
+		}
+		break;
+	case CRA_ACTION_PAIR:
+		put_magic(result);
+		n = 4;
+		if (!kept && relay_auth.pair[0] != '\0') {
+			memcpy(result + 4, relay_auth.pair, strlen(relay_auth.pair));
+			n += strlen(relay_auth.pair);
+		}
+		break;
+	case CRA_ACTION_PAIRED:
+		if (len != 5 || !has_magic(param)) {
+			code = CRA_ERR_PARAM;
+		} else {
+			relay_auth.pair[0] = '\0';
+			put_magic(result);
+			n = 4;
+		}
+		break;
+	default:
+		code = CRA_ERR_PARAM;
+	}
+
+	if (report) {
+		emit_begin("relayAuth");
+		emit_int("action", (long)action);
+		emit_int("code", (long)code);
+		if (code == CRA_OK && action == CRA_ACTION_ENROL) {
+			relay_fingerprint(fp);
+			emit_hex("fingerprint", fp, sizeof(fp));
+		}
+		if (code == CRA_OK && action == CRA_ACTION_TRANSPORT) {
+			emit_int("port", (long)relay_auth.port);
+			emit_str("name", relay_auth.name, 0);
+			emit_hex("pin", relay_auth.pin, sizeof(relay_auth.pin));
+		}
+		if (code == CRA_OK && action == CRA_ACTION_PAIRED)
+			emit_int("accepted", param[4] ? 1 : 0);
+		emit_end();
+	}
+
+	reply[0] = dlpFuncCallApplication | 0x80;
+	reply[1] = 1;
+	set_short(reply + 2, 0);
+	reply[4] = 0x21;			/* the argument ID of the call, tiny form */
+	reply[5] = (uint8_t)(16 + n);
+	set_long(reply + 6, code);
+	set_long(reply + 10, n);
+	set_long(reply + 14, 0);
+	set_long(reply + 18, 0);
+	memcpy(reply + 22, result, n);
+	crypto_wipe(result, sizeof(result));
+	return 22 + n;
+}
+
+/* ---- Relay: TLS to the airlock's Secure listener ------------------------ */
+
+/* With the transport record held, the relay comes in over TLS 1.3 to the
+ * record's port: server name airlock.cradle (SNI), ALPN cradle-hotsync/1,
+ * the server known by the SPKI pin in the record and nothing else (no
+ * chain, no client certificate: the Palm proves itself inside the session,
+ * above). NetSync runs inside unchanged. Network.framework does the TLS;
+ * libpisock sees one end of a socket pair, and two queues move bytes
+ * between the other end and the connection. */
+
+#define RELAY_TLS_CONNECT_S 30
+
+struct relay_tls {
+	nw_connection_t conn;
+	int fd;				/* the pump's end of the socket pair */
+	dispatch_queue_t rx, tx;
+	dispatch_source_t reader;
+	dispatch_semaphore_t up, drained;
+	int ready, failed, pin_ok;
+	char why[200];
+};
+
+/* One DER tag-length header at p: its header size and content length. */
+static int der_header(const uint8_t *p, size_t n, size_t *hdr, size_t *len)
+{
+	size_t i, k;
+
+	if (n < 2)
+		return 0;
+	if ((p[1] & 0x80) == 0) {
+		*hdr = 2;
+		*len = p[1];
+	} else {
+		k = p[1] & 0x7F;
+		if (k == 0 || k > 4 || n < 2 + k)
+			return 0;
+		*len = 0;
+		for (i = 0; i < k; i++)
+			*len = *len << 8 | p[2 + i];
+		*hdr = 2 + k;
+	}
+	return *hdr + *len <= n;
+}
+
+/* The SubjectPublicKeyInfo of a DER certificate (the whole TLV, which is
+ * what the pin hashes): Certificate { TBSCertificate { [0] version,
+ * serial, signature, issuer, validity, subject, subjectPublicKeyInfo ... */
+static int der_spki(const uint8_t *cert, size_t n, const uint8_t **spki, size_t *spkilen)
+{
+	size_t hdr, len, i;
+	const uint8_t *p = cert, *end;
+
+	if (!der_header(p, n, &hdr, &len) || p[0] != 0x30)
+		return 0;
+	p += hdr;
+	end = p + len;
+	if (!der_header(p, (size_t)(end - p), &hdr, &len) || p[0] != 0x30)
+		return 0;
+	p += hdr;
+	end = p + len;
+	if (p < end && p[0] == 0xA0) {		/* version, optional */
+		if (!der_header(p, (size_t)(end - p), &hdr, &len))
+			return 0;
+		p += hdr + len;
+	}
+	for (i = 0; i < 5; i++) {		/* serial, signature, issuer, validity, subject */
+		if (!der_header(p, (size_t)(end - p), &hdr, &len))
+			return 0;
+		p += hdr + len;
+	}
+	if (!der_header(p, (size_t)(end - p), &hdr, &len) || p[0] != 0x30)
+		return 0;
+	*spki = p;
+	*spkilen = hdr + len;
+	return 1;
+}
+
+/* Does the server's certificate carry the pinned key? */
+static int relay_tls_pinned(sec_trust_t trust)
+{
+	SecTrustRef ref = sec_trust_copy_ref(trust);
+	CFArrayRef chain;
+	SecCertificateRef leaf;
+	CFDataRef der;
+	const uint8_t *spki;
+	size_t spkilen;
+	uint8_t sum[CC_SHA256_DIGEST_LENGTH];
+	int ok = 0;
+
+	if (ref == NULL)
+		return 0;
+	chain = SecTrustCopyCertificateChain(ref);
+	if (chain != NULL && CFArrayGetCount(chain) > 0) {
+		leaf = (SecCertificateRef)CFArrayGetValueAtIndex(chain, 0);
+		der = SecCertificateCopyData(leaf);
+		if (der != NULL) {
+			if (der_spki(CFDataGetBytePtr(der), (size_t)CFDataGetLength(der), &spki, &spkilen)) {
+				CC_SHA256(spki, (CC_LONG)spkilen, sum);
+				ok = memcmp(sum, relay_auth.pin, sizeof(sum)) == 0;
+			}
+			CFRelease(der);
+		}
+	}
+	if (chain != NULL)
+		CFRelease(chain);
+	CFRelease(ref);
+	return ok;
+}
+
+static void relay_tls_fail(struct relay_tls *t, const char *why)
+{
+	if (!t->failed && !t->ready) {
+		t->failed = 1;
+		snprintf(t->why, sizeof(t->why), "%s", why);
+		dispatch_semaphore_signal(t->up);
+	}
+}
+
+/* Bytes from the server go into the socket pair; libpisock reads them. */
+static void relay_tls_receive(struct relay_tls *t)
+{
+	nw_connection_receive(t->conn, 1, 65536, ^(dispatch_data_t content, nw_content_context_t ctx, bool complete, nw_error_t err) {
+		(void)ctx;
+		if (content != NULL) {
+			dispatch_data_apply(content, ^bool(dispatch_data_t region, size_t offset, const void *buf, size_t size) {
+				const uint8_t *p = buf;
+				(void)region; (void)offset;
+				while (size > 0) {
+					ssize_t w = write(t->fd, p, size);
+					if (w <= 0)
+						return false;
+					p += w;
+					size -= (size_t)w;
+				}
+				return true;
+			});
+		}
+		if (err != NULL || complete) {
+			shutdown(t->fd, SHUT_WR);	/* EOF for libpisock: the server hung up */
+			return;
+		}
+		relay_tls_receive(t);
+	});
+}
+
+/* Bytes libpisock writes go to the server. */
+static void relay_tls_pump_out(struct relay_tls *t)
+{
+	t->reader = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, (uintptr_t)t->fd, 0, t->tx);
+	dispatch_source_set_event_handler(t->reader, ^{
+		uint8_t *buf = malloc(65536);
+		ssize_t n = buf != NULL ? read(t->fd, buf, 65536) : -1;
+		dispatch_data_t data;
+
+		if (n <= 0) {
+			/* libpisock closed its end: what it wrote last is on its way,
+			 * and the final message after it says so to the server */
+			free(buf);
+			dispatch_source_cancel(t->reader);
+			nw_connection_send(t->conn, NULL, NW_CONNECTION_FINAL_MESSAGE_CONTEXT, true, ^(nw_error_t e) {
+				(void)e;
+				dispatch_semaphore_signal(t->drained);
+			});
+			return;
+		}
+		data = dispatch_data_create(buf, (size_t)n, t->tx, DISPATCH_DATA_DESTRUCTOR_FREE);
+		nw_connection_send(t->conn, data, NW_CONNECTION_DEFAULT_MESSAGE_CONTEXT, true, ^(nw_error_t e) { (void)e; });
+	});
+	dispatch_resume(t->reader);
+}
+
+static struct relay_tls *relay_tls_active;
+
+/* Opens the TLS connection; returns libpisock's end of the socket pair, or
+ * -1 with the error reported. */
+static int relay_tls_connect(const char *host)
+{
+	struct relay_tls *t;
+	char service[8];
+	int fds[2];
+	nw_endpoint_t endpoint;
+	nw_parameters_t params;
+
+	t = calloc(1, sizeof(*t));
+	if (t == NULL || socketpair(AF_UNIX, SOCK_STREAM, 0, fds) < 0) {
+		emit_error("relay", "cannot set up the secure connection (%s)", strerror(errno));
+		free(t);
+		return -1;
+	}
+	t->fd = fds[1];
+	t->rx = dispatch_queue_create("relay.tls.rx", DISPATCH_QUEUE_SERIAL);
+	t->tx = dispatch_queue_create("relay.tls.tx", DISPATCH_QUEUE_SERIAL);
+	t->up = dispatch_semaphore_create(0);
+	t->drained = dispatch_semaphore_create(0);
+
+	snprintf(service, sizeof(service), "%u", relay_auth.port);
+	endpoint = nw_endpoint_create_host(host, service);
+	params = nw_parameters_create_secure_tcp(^(nw_protocol_options_t tls) {
+		sec_protocol_options_t o = nw_tls_copy_sec_protocol_options(tls);
+		sec_protocol_options_set_min_tls_protocol_version(o, tls_protocol_version_TLSv13);
+		sec_protocol_options_add_tls_application_protocol(o, "cradle-hotsync/1");
+		sec_protocol_options_set_tls_server_name(o, relay_auth.name);
+		/* the pin is the whole verification: no chain, no name check */
+		sec_protocol_options_set_verify_block(o, ^(sec_protocol_metadata_t md, sec_trust_t trust, sec_protocol_verify_complete_t done) {
+			(void)md;
+			t->pin_ok = relay_tls_pinned(trust);
+			done(t->pin_ok);
+		}, t->rx);
+		sec_release(o);
+	}, ^(nw_protocol_options_t tcp) {
+		nw_tcp_options_set_no_delay(tcp, true);
+	});
+	t->conn = nw_connection_create(endpoint, params);
+	nw_release(endpoint);
+	nw_release(params);
+
+	nw_connection_set_queue(t->conn, t->rx);
+	nw_connection_set_state_changed_handler(t->conn, ^(nw_connection_state_t state, nw_error_t err) {
+		char why[200];
+
+		switch (state) {
+		case nw_connection_state_ready:
+			if (!t->ready) {
+				t->ready = 1;
+				dispatch_semaphore_signal(t->up);
+			}
+			break;
+		case nw_connection_state_failed:
+		case nw_connection_state_waiting:
+			if (err != NULL) {
+				if (nw_error_get_error_domain(err) == nw_error_domain_tls)
+					snprintf(why, sizeof(why), "%s (TLS %d)", t->pin_ok ? "the TLS handshake failed"
+						: "the server's certificate does not match the pin", nw_error_get_error_code(err));
+				else
+					snprintf(why, sizeof(why), "cannot reach the server (%s %d)",
+						nw_error_get_error_domain(err) == nw_error_domain_dns ? "DNS" : "error",
+						nw_error_get_error_code(err));
+				relay_tls_fail(t, why);
+			}
+			if (state == nw_connection_state_failed)
+				shutdown(t->fd, SHUT_RDWR);
+			break;
+		case nw_connection_state_cancelled:
+			close(t->fd);
+			break;
+		default:
+			break;
+		}
+	});
+	nw_connection_start(t->conn);
+	if (dispatch_semaphore_wait(t->up, dispatch_time(DISPATCH_TIME_NOW, (int64_t)RELAY_TLS_CONNECT_S * NSEC_PER_SEC)) != 0)
+		relay_tls_fail(t, "no answer from the secure port");
+	if (!t->ready) {
+		emit_error("relay", "secure connection to %s:%u failed: %s", host, relay_auth.port, t->why);
+		nw_connection_cancel(t->conn);
+		close(fds[0]);
+		relay_tls_active = t;	/* released with the connection, below */
+		return -1;
+	}
+	{
+		/* the ALPN the server agreed to must be Cradle's */
+		nw_protocol_metadata_t pm = nw_connection_copy_protocol_metadata(t->conn, nw_protocol_copy_tls_definition());
+		sec_protocol_metadata_t sm = pm != NULL ? nw_tls_copy_sec_protocol_metadata(pm) : NULL;
+		const char *alpn = sm != NULL ? sec_protocol_metadata_copy_negotiated_protocol(sm) : NULL;
+		int ok = alpn != NULL && strcmp(alpn, "cradle-hotsync/1") == 0;
+
+		if (alpn != NULL)
+			free((void *)alpn);
+		if (sm != NULL)
+			sec_release(sm);
+		if (pm != NULL)
+			nw_release(pm);
+		if (!ok) {
+			emit_error("relay", "the server does not speak cradle-hotsync/1");
+			nw_connection_cancel(t->conn);
+			close(fds[0]);
+			relay_tls_active = t;
+			return -1;
+		}
+	}
+	relay_tls_receive(t);
+	relay_tls_pump_out(t);
+	relay_tls_active = t;
+	return fds[0];
+}
+
+/* Ends the connection once libpisock's end is closed: after what libpisock
+ * wrote last has gone out (the Palm's reply to EndOfSync), or five seconds. */
+static void relay_tls_close(void)
+{
+	struct relay_tls *t = relay_tls_active;
+
+	if (t == NULL)
+		return;
+	relay_tls_active = NULL;
+	if (t->ready)
+		dispatch_semaphore_wait(t->drained, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+	nw_connection_cancel(t->conn);
+	/* the queues and the connection live on until their blocks are done;
+	 * the process ends with the session anyway */
+}
+
 static void emit_relayed(const char *event, long packets, long bytes)
 {
 	emit_begin(event);
@@ -834,21 +1468,32 @@ static void emit_relayed(const char *event, long packets, long bytes)
 static int relay_session(int sd, const char *target)
 {
 	int fd, netsd, netfd, ended = 0, lost = 0;
-	long packets = 0, bytes = 0;
+	long packets = 0, bytes = 0, answered = 0;
+	char host[256], service[16];
 	pi_buffer_t *buf;
 	pi_socket_t *ps;
 
-	fd = relay_connect(target);
+	if (!relay_parse_target(target, host, service))
+		return 0;
+	/* with the Secure transport record held, the session goes over TLS to
+	 * the record's port, whatever port the address names */
+	relay_auth.secure = relay_auth.has_transport;
+	fd = relay_auth.secure ? relay_tls_connect(host) : relay_connect(host, service);
 	if (fd < 0)
 		return 0;
 	netsd = relay_adopt(fd);
-	if (netsd < 0)
+	if (netsd < 0) {
+		relay_tls_close();
 		return 0;
+	}
 	ps = find_pi_socket(netsd);
 	netfd = ps != NULL ? ps->sd : -1;
 
 	emit_begin("relayStarted");
 	emit_str("target", target, 0);
+	emit_int("secure", relay_auth.secure);
+	if (relay_auth.secure)
+		emit_int("port", (long)relay_auth.port);
 	emit_end();
 
 	buf = pi_buffer_new(0xFFFF);
@@ -877,6 +1522,26 @@ static int relay_session(int sd, const char *target)
 		}
 		if (buf->used > 0 && buf->data[0] == dlpFuncEndOfSync)
 			ended = 1;
+		/* ... answered here when it is for the authenticator ... */
+		if (relay_auth.has_key) {
+			unsigned action;
+			const uint8_t *param;
+			size_t plen;
+
+			if (relay_auth_request(buf->data, buf->used, &action, &param, &plen)) {
+				uint8_t reply[128];
+				size_t rlen = relay_auth_answer(action, param, plen, reply);
+
+				if (pi_write(netsd, reply, rlen) < 0) {
+					emit_error("relay", "the server hung up while receiving a reply");
+					break;
+				}
+				bytes += (long)buf->used + (long)rlen;
+				packets++;
+				answered++;
+				continue;
+			}
+		}
 		/* ... to the Palm, and its reply back */
 		if (pi_write(sd, buf->data, buf->used) < 0) {
 			emit_error("relay", "connection lost while writing to the Palm");
@@ -913,10 +1578,12 @@ static int relay_session(int sd, const char *target)
 		pi_setsockopt(sd, PI_LEVEL_SOCK, PI_SOCK_STATE, &state, &size);
 	}
 	pi_close(netsd);
+	relay_tls_close();
 
 	emit_begin("relayFinished");
 	emit_int("packets", packets);
 	emit_int("bytes", bytes);
+	emit_int("answered", answered);
 	emit_int("ended", ended);
 	emit_end();
 	(void)lost;
@@ -1607,6 +2274,12 @@ static void run_commands(int sd)
 			/* Der Palm zeigt jeden Eintrag als eigene Zeile im HotSync-Log */
 			strncat(entry, "\n", sizeof(entry) - strlen(entry) - 1);
 			dlp_AddSyncLogEntry(sd, entry);
+		} else if (strncmp(line, "relaykey ", 9) == 0) {
+			relay_set_key(line + 9);
+		} else if (strncmp(line, "relaytls ", 9) == 0) {
+			relay_set_transport(line + 9);
+		} else if (strncmp(line, "relaypair", 9) == 0 && (line[9] == ' ' || line[9] == '\0')) {
+			relay_set_pair(line[9] == ' ' ? line + 10 : line + 9);
 		} else if (strncmp(line, "relay ", 6) == 0) {
 			if (relay_session(sd, line + 6))
 				break;	/* the server has ended the session */
