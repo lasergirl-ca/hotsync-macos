@@ -386,6 +386,42 @@ final class AppState {
         saveTab(tab)
     }
 
+    func setRelayAddress(_ address: String, for tabId: UUID) {
+        guard var tab = tabStore.tab(tabId) else { return }
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value: String? = trimmed.isEmpty ? nil : trimmed
+        guard tab.relayAddress != value else { return }
+        tab.relayAddress = value
+        saveTab(tab)
+    }
+
+    func setRelayPairCode(_ code: String, for tabId: UUID) {
+        guard var tab = tabStore.tab(tabId) else { return }
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value: String? = trimmed.isEmpty ? nil : trimmed
+        guard tab.relayPairCode != value else { return }
+        tab.relayPairCode = value
+        saveTab(tab)
+    }
+
+    private func setRelayTransport(_ transport: RelayTransport?, for tabId: UUID) {
+        guard var tab = tabStore.tab(tabId), tab.relayTransport != transport else { return }
+        tab.relayTransport = transport
+        saveTab(tab)
+    }
+
+    /// Vergisst den Cradle-Schlüssel des Palms und den Secure-Transport: der
+    /// nächste HotSync geht wieder unverschlüsselt an die Adresse und meldet
+    /// einen neuen Schlüssel an.
+    func forgetCradleKey(for tabId: UUID) {
+        guard let tab = tabStore.tab(tabId) else { return }
+        if let profile = deviceManager.profile(tab.profileId), profile.isBound {
+            CradleKeyStore.forget(for: UInt32(truncatingIfNeeded: profile.userId))
+        }
+        setRelayTransport(nil, for: tabId)
+        tabLog(tabId, L10n.logRelayForgotten)
+    }
+
     func setModeForAllTabs(_ mode: HotSyncMode) {
         for var tab in tabStore.tabs where tab.hotSyncMode != mode {
             tab.hotSyncMode = mode
@@ -643,8 +679,14 @@ final class AppState {
         var rejection: TabStatus.Rejection?
         /// Ablauf einer angenommenen Sitzung: zurückspielen (falls angefragt),
         /// die Warteschlange installieren, sichern (falls eingeschaltet)
-        enum Stage { case restoring, installing, backingUp, readingCalendar, twoWayCalendar, fixingLocations, dumpingROM }
+        enum Stage { case restoring, installing, backingUp, readingCalendar, twoWayCalendar, fixingLocations, dumpingROM, relaying }
         var stage: Stage = .installing
+        /// über Cradle: die Verbindung steht, Cradle führt den HotSync;
+        /// `relayEnded`: Cradle hat ihn beendet (nil: noch nicht fertig)
+        var relayStarted = false
+        var relayPackets = 0
+        var relayBytes = 0
+        var relayEnded: Bool?
         /// nach der Sicherung: diese Datenbanken vom Palm lesen und prüfen
         var checkDatabases: [String] = []
         var checking: String?
@@ -987,6 +1029,66 @@ final class AppState {
 
         case .finished:
             break
+
+        // über Cradle: nur mitzählen; das Werkzeug beendet sich von selbst
+        case .relayStarted(let target, let secure):
+            session.relayStarted = true
+            if let tabId = session.tabId {
+                tabLog(tabId, secure ? L10n.logRelayStartedSecure(target) : L10n.logRelayStarted(target))
+            }
+
+        case .relayKey(let fingerprint):
+            if let tabId = session.tabId { tabLog(tabId, L10n.logRelayKey(fingerprint)) }
+
+        // der Mac hat einen Authenticator-Aufruf für den Palm beantwortet
+        case .relayAuth(let auth):
+            guard let tabId = session.tabId else { break }
+            switch (auth.kind, auth.ok) {
+            case (.enrol, true):
+                tabLog(tabId, L10n.logRelayEnrolled(auth.fingerprint ?? ""))
+            case (.sign, true):
+                tabLog(tabId, L10n.logRelayProved)
+            case (.sign, false) where auth.code == RelayAuth.refusedOnPlain:
+                tabLog(tabId, L10n.logRelayPlainRefused)
+            case (.transport, true):
+                if let port = auth.port, let name = auth.name, let pin = auth.pin {
+                    setRelayTransport(RelayTransport(port: port, name: name, pin: pin), for: tabId)
+                    tabLog(tabId, L10n.logRelayTransport(port, name))
+                }
+            case (.pair, true):
+                if tabStore.tab(tabId)?.relayPairCode != nil { tabLog(tabId, L10n.logRelayPairAsked) }
+            case (.paired, true):
+                setRelayPairCode("", for: tabId)
+                tabLog(tabId, L10n.logRelayPaired(auth.accepted ?? false))
+            case (_, false):
+                tabLog(tabId, L10n.logRelayAuthRefused(auth.action, auth.code))
+            default:
+                break
+            }
+
+        case .relayed(let packets, let bytes):
+            session.relayPackets = packets
+            session.relayBytes = bytes
+            if let tabId = session.tabId, let user = session.user {
+                statuses[tabId]?.phase = .relaying(user: user, packets: packets)
+            }
+
+        case .relayFinished(let packets, let bytes, let ended):
+            session.relayPackets = packets
+            session.relayBytes = bytes
+            session.relayEnded = ended
+            if let tabId = session.tabId { tabLog(tabId, L10n.logRelayFinished(packets, bytes, ended: ended)) }
+
+        case .error(let stage, let message) where session.stage == .relaying && stage == "relay":
+            session.errorMessage = "\(stage): \(message)"
+            DebugLog.shared.log(L10n.logSessionError(portLabel(port), stage, message), source: "Session")
+            if let tabId = session.tabId { tabLog(tabId, L10n.logSessionError(portLabel(port), stage, message)) }
+            // nichts beim Airlock angekommen: der Palm hängt noch an diesem
+            // Werkzeug, die Sitzung sauber beenden; sonst endet sie von selbst
+            if !session.relayStarted {
+                session.runner.send("log " + L10n.palmLogNothingInstalled)
+                session.runner.send("end")
+            }
 
         case .error(_, let message) where session.stage == .dumpingROM:
             // ein Fehler beendet das Auslesen; die Sitzung selbst ist heil
@@ -1334,6 +1436,10 @@ final class AppState {
         selectedTabId = tabId
 
         let mode = tabStore.tab(tabId)?.hotSyncMode ?? .installBackup
+        if mode.relays {
+            startRelay(session, tabId: tabId, user: user)
+            return
+        }
         let palmOS = PalmOSVersion(rom: session.romVersion)
         // Abgleiche, deren Mac-Seite asynchron liefert (Erinnerungen, Notizen)
         var deferred: [@MainActor () async -> Void] = []
@@ -1469,6 +1575,47 @@ final class AppState {
             guard let self, let session else { return }
             self.startQueue(session, profileId: profileId, tabId: tabId, user: user, queue: queue, mode: mode)
         }
+    }
+
+    /// "An Cradle weiterreichen": das Werkzeug verbindet sich mit dem
+    /// Airlock und reicht von da an nur Pakete durch; die Sitzung endet,
+    /// wenn Cradle sie beendet (oder eine Seite wegbricht). Kein
+    /// Installieren, Sichern oder Abgleichen von hier.
+    private func startRelay(_ session: Session, tabId: UUID, user: PalmUser) {
+        statuses[tabId]?.lastResult = nil
+        statuses[tabId]?.lastBackup = nil
+        statuses[tabId]?.lastRestore = nil
+        statuses[tabId]?.lastROMDump = nil
+        guard let target = tabStore.tab(tabId)?.relayAddress, !target.isEmpty else {
+            tabLog(tabId, L10n.logRelayNoAddress)
+            session.errorMessage = L10n.logRelayNoAddress
+            session.runner.send("log " + L10n.palmLogNothingInstalled)
+            session.runner.send("end")
+            return
+        }
+        // Der Palm kann CradleSync nicht ausführen: der Mac hält seinen Cradle-
+        // Schlüssel und beantwortet die Authentifizierung des Airlocks für ihn
+        guard let seed = CradleKeyStore.seed(for: user.userId, create: true) else {
+            tabLog(tabId, L10n.logRelayNoKeychain)
+            session.errorMessage = L10n.logRelayNoKeychain
+            session.runner.send("log " + L10n.palmLogNothingInstalled)
+            session.runner.send("end")
+            return
+        }
+        session.stage = .relaying
+        statuses[tabId]?.phase = .relaying(user: user, packets: 0)
+        session.runner.send("relaykey \(seed)")
+        let tab = tabStore.tab(tabId)
+        if let transport = tab?.relayTransport {
+            // Secure ausgegeben: ab jetzt nur noch über TLS an den Port des Transports
+            tabLog(tabId, L10n.logRelaySecure(transport.port))
+            session.runner.send("relaytls \(transport.port) \(transport.name) \(transport.pin)")
+        }
+        if let code = tab?.relayPairCode, !code.isEmpty {
+            session.runner.send("relaypair \(code)")
+        }
+        tabLog(tabId, L10n.logRelayStarting(target))
+        session.runner.send("relay \(target)")
     }
 
     /// Die Warteschlange ist vollständig: was von ihr auf den Palm geht,
@@ -2438,7 +2585,13 @@ final class AppState {
         }
 
         let result: TabStatus.Result?
-        if session.admitted {
+        if session.admitted, session.stage == .relaying {
+            if session.relayStarted {
+                result = .relayed(date: now, packets: session.relayPackets, bytes: session.relayBytes, ended: session.relayEnded ?? false)
+            } else {
+                result = .failed(date: now, message: session.errorMessage ?? L10n.sessionExitStatus(0))
+            }
+        } else if session.admitted {
             result = .finished(date: now, installed: session.installed.count, failed: session.failed.count)
         } else if let rejection = session.rejection {
             result = .rejected(date: now, rejection)
@@ -2522,6 +2675,7 @@ final class AppState {
     private func chainFailureReason(_ result: TabStatus.Result?) -> String {
         switch result {
         case .finished(_, _, let failed): return L10n.chainReasonFilesFailed(failed)
+        case .relayed(_, let packets, let bytes, let ended): return L10n.logRelayFinished(packets, bytes, ended: ended)
         case .timedOut: return L10n.chainReasonTimeout(Self.chainStepTimeout / 60)
         case .failed(_, let message): return message
         case .rejected(_, let rejection):

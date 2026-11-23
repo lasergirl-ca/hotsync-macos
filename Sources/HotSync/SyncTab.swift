@@ -21,6 +21,15 @@ struct SyncTab: Codable, Identifiable, Equatable {
     /// aus einer Version ohne PIM-Abgleich bleibt bei Installieren und
     /// Sichern, der Abgleich kommt erst, wenn man ihn wählt
     var mode: HotSyncMode?
+    /// "An Cradle weiterreichen": der Cradle-Airlock, "host" oder
+    /// "host:port" (Vorgabe Port 14238)
+    var relayAddress: String?
+    /// Der Secure-Transport, den der Airlock durch das Relay ausgegeben hat;
+    /// ab dann geht der HotSync über TLS an diesen Port, nie mehr unverschlüsselt
+    var relayTransport: RelayTransport?
+    /// Ein Pair-Code für Cradle, hier getippt statt in CradleSync; der Airlock
+    /// fragt ihn beim nächsten HotSync ab, danach ist er vergessen
+    var relayPairCode: String?
 
     var hotSyncMode: HotSyncMode {
         get { mode ?? (fullSync == false ? .installOnly : .installBackup) }
@@ -82,6 +91,17 @@ struct SyncTab: Codable, Identifiable, Equatable {
     }
 }
 
+/// Der Secure-Transport eines Cradle-Airlocks, wie CradleSync ihn hält:
+/// TLS-Port, Servername (SNI) und der SPKI-Pin seines Zertifikats (Hex).
+struct RelayTransport: Codable, Equatable {
+    var port: Int
+    var name: String
+    var pin: String
+
+    /// die ersten acht Bytes des Pins, wie die Konsole ihn zeigt
+    var shortPin: String { String(pin.prefix(16)) }
+}
+
 /// Die Betriebsart eines Tabs: welche Schritte ein HotSync macht.
 /// "Abgleichen" ist der PIM-Abgleich (Kalender, Kontakte), wie im Profil
 /// eingestellt; "Installieren" die Warteschlange; "Sichern" die Sicherung.
@@ -91,10 +111,14 @@ enum HotSyncMode: String, Codable, CaseIterable, Equatable {
     case installBackup
     case installOnly
     case syncOnly
+    /// der ganze HotSync geht an einen Cradle-Server im Netz (LANSync):
+    /// der Mac reicht nur die Pakete durch, Cradle führt die Sitzung
+    case relay
 
     var syncs: Bool { self == .syncInstallBackup || self == .syncOnly }
-    var installs: Bool { self != .syncOnly }
+    var installs: Bool { self != .syncOnly && self != .relay }
     var backsUp: Bool { self == .syncInstallBackup || self == .installBackup }
+    var relays: Bool { self == .relay }
 }
 
 /// Eine Kette: Tabs, die nacheinander syncen - "wenn A fertig ist, B, dann C".

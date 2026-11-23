@@ -258,13 +258,14 @@ private struct TabButton: View {
     private var dotColor: Color {
         guard let status = appState.status(tab.id) else { return .gray }
         switch status.phase {
-        case .restoring, .syncing, .backingUp, .readingCalendar, .dumpingROM: return .blue
+        case .restoring, .syncing, .backingUp, .readingCalendar, .dumpingROM, .relaying: return .blue
         case .listening: return .green
         case .waitingForPort: return .orange
         case .idle:
             switch status.lastResult {
             case .rejected, .failed, .timedOut: return .red
             case .finished(_, _, let failed): return failed > 0 ? .orange : .gray
+            case .relayed(_, _, _, let ended): return ended ? .gray : .red
             case .stopped, nil: return .gray
             }
         }

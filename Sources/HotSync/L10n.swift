@@ -216,8 +216,8 @@ enum L10n {
     }
     static var tabSyncMode: String { s("HotSync", "HotSync") }
     static var tabSyncModeHint: String { s(
-        "„Abgleichen“ ist der Abgleich von Kalender, Kontakten, Aufgaben, Memos, Uhr und Zeitzonen, wie er für diesen Palm eingestellt ist; „Installieren“ die Warteschlange; „Sichern“ holt nach den Installationen die Datenbanken im RAM des Palms auf den Mac – beim ersten Mal alle, danach nur die geänderten. Für einen langsamen seriellen Tab kann „Nur installieren“ sinnvoll sein.",
-        "“Sync” is the Calendar, Contacts, Tasks, Memos, clock and time-zone sync as set up for this Palm; “Install” the queue; “Back Up” fetches the Palm's RAM databases to the Mac after the installs – all of them the first time, then only the changed ones. For a slow serial tab, “Install Only” can make sense."
+        "„Abgleichen“ ist der Abgleich von Kalender, Kontakten, Aufgaben, Memos, Uhr und Zeitzonen, wie er für diesen Palm eingestellt ist; „Installieren“ die Warteschlange; „Sichern“ holt nach den Installationen die Datenbanken im RAM des Palms auf den Mac – beim ersten Mal alle, danach nur die geänderten. Für einen langsamen seriellen Tab kann „Nur installieren“ sinnvoll sein. „An Cradle weiterreichen“ gibt den ganzen HotSync an einen Cradle-Server im Netz, wie einst LANSync: Cradle führt die Sitzung und ihre Conduits, der Mac reicht nur die Pakete durch.",
+        "“Sync” is the Calendar, Contacts, Tasks, Memos, clock and time-zone sync as set up for this Palm; “Install” the queue; “Back Up” fetches the Palm's RAM databases to the Mac after the installs – all of them the first time, then only the changed ones. For a slow serial tab, “Install Only” can make sense. “Relay to Cradle” hands the whole HotSync to a Cradle server on the network, as LANSync did: Cradle runs the session and its conduits, the Mac only passes the packets through."
     ) }
     static func modeName(_ mode: HotSyncMode) -> String {
         switch mode {
@@ -225,8 +225,72 @@ enum L10n {
         case .syncOnly: return s("Nur abgleichen", "Sync Only")
         case .installBackup: return s("Installieren + Sichern", "Install + Back Up")
         case .installOnly: return s("Nur installieren", "Install Only")
+        case .relay: return s("An Cradle weiterreichen", "Relay to Cradle")
         }
     }
+    static var relayAddressLabel: String { s("Cradle:", "Cradle:") }
+    static var relayAddressPlaceholder: String { "host:14238" }
+    static var relayAddressHint: String { s(
+        "Adresse des Cradle-Airlocks: Host oder Host:Port (Vorgabe: Port 14238, der Netzwerk-HotSync). Der Palm am Kabel wird dort angemeldet, als käme er übers Netz.",
+        "Address of the Cradle airlock: host or host:port (default: port 14238, network HotSync). The Palm on the cable shows up there as if it came over the network."
+    ) }
+    static var relayPairLabel: String { s("Pair-Code:", "Pair code:") }
+    static var relayPairPlaceholder: String { "ABCD-EFGH" }
+    static var relayPairHint: String { s(
+        "Ein Pair-Code von der Cradle-Konsole (Benutzer, „Pair a Palm“), hier getippt statt in CradleSync, das dieser Palm nicht ausführen kann. Der Airlock fragt ihn beim nächsten HotSync ab; danach ist er vergessen.",
+        "A pair code from the Cradle console (Users, “Pair a Palm”), typed here instead of into CradleSync, which this Palm cannot run. The airlock asks for it at the next HotSync; after that it is forgotten."
+    ) }
+    static func relaySecureHeld(_ port: Int, _ pin: String) -> String { s(
+        "Secure: TLS-Port \(port), Pin \(pin)…", "Secure: TLS port \(port), pin \(pin)…"
+    ) }
+    static var relaySecureHint: String { s(
+        "Cradle hat seinen Secure-Transport ausgegeben: der HotSync geht über TLS an diesen Port, der Server ist am Pin erkannt. Unverschlüsselt geht nichts mehr – „Vergessen“ setzt den Palm zurück, dann meldet der nächste HotSync einen neuen Schlüssel an (den Cradle erst nimmt, wenn der Authenticator des Palms in der Konsole zurückgesetzt wurde).",
+        "Cradle issued its Secure transport: the HotSync goes over TLS to this port, the server known by the pin. Nothing goes plainly any more – “Forget” resets the Palm, and the next HotSync enrols a new key (which Cradle takes only once the Palm's authenticator is reset in the console)."
+    ) }
+    static var relayForget: String { s("Vergessen", "Forget") }
+    static func logRelayKey(_ fingerprint: String) -> String { s(
+        "Cradle-Schlüssel dieses Palms: \(fingerprint) (im Schlüsselbund dieses Macs)",
+        "This Palm's Cradle key: \(fingerprint) (in this Mac's Keychain)"
+    ) }
+    static var logRelayNoKeychain: String { s(
+        "Der Schlüsselbund gibt keinen Cradle-Schlüssel her – HotSync beendet",
+        "The Keychain would not give a Cradle key – HotSync ended"
+    ) }
+    static func logRelaySecure(_ port: Int) -> String { s(
+        "Secure: Verbindung über TLS an Port \(port)", "Secure: connecting over TLS to port \(port)"
+    ) }
+    static func logRelayStartedSecure(_ target: String) -> String { s(
+        "Verbunden mit \(target) über TLS – Cradle führt den HotSync", "Connected to \(target) over TLS – Cradle runs the HotSync"
+    ) }
+    static func logRelayEnrolled(_ fingerprint: String) -> String { s(
+        "Schlüssel \(fingerprint) bei Cradle angemeldet – der Mac bürgt für diesen Palm",
+        "Key \(fingerprint) enrolled with Cradle – this Mac vouches for the Palm"
+    ) }
+    static var logRelayProved: String { s(
+        "Cradles Challenge für den Palm beantwortet", "Answered Cradle's challenge for the Palm"
+    ) }
+    static var logRelayPlainRefused: String { s(
+        "Unverschlüsselte Sitzung, aber ein Pin ist hinterlegt: keine Unterschrift für diesen Absender",
+        "Plain session with a pin held: no signature for this asker"
+    ) }
+    static func logRelayTransport(_ port: Int, _ name: String) -> String { s(
+        "Cradle hat seinen Secure-Transport ausgegeben (\(name), TLS-Port \(port)) – der nächste HotSync geht verschlüsselt",
+        "Cradle issued its Secure transport (\(name), TLS port \(port)) – the next HotSync goes encrypted"
+    ) }
+    static var logRelayPairAsked: String { s(
+        "Cradle hat nach dem Pair-Code gefragt", "Cradle asked for the pair code"
+    ) }
+    static func logRelayPaired(_ accepted: Bool) -> String {
+        accepted
+            ? s("Cradle hat den Pair-Code angenommen – der Palm ist gepaart", "Cradle took the pair code – the Palm is paired")
+            : s("Cradle hat den Pair-Code nicht angenommen", "Cradle did not take the pair code")
+    }
+    static func logRelayAuthRefused(_ action: Int, _ code: Int) -> String { s(
+        "Authenticator-Aufruf \(action) abgelehnt (Code \(code))", "Authenticator call \(action) refused (code \(code))"
+    ) }
+    static var logRelayForgotten: String { s(
+        "Cradle-Schlüssel und Secure-Transport vergessen", "Cradle key and Secure transport forgotten"
+    ) }
     static func allTabsMode(_ mode: HotSyncMode) -> String {
         s("Alle Tabs: \(modeName(mode))", "All Tabs: \(modeName(mode))")
     }
@@ -278,6 +342,11 @@ enum L10n {
     static func phaseSyncingNothing(_ name: String) -> String { s(
         "\(name) verbunden – nichts zu installieren", "\(name) connected – nothing to install"
     ) }
+    static func phaseRelaying(_ name: String, _ packets: Int) -> String {
+        packets == 0
+            ? s("\(name): wird an Cradle weitergereicht …", "\(name): relaying to Cradle …")
+            : s("\(name): HotSync läuft über Cradle – \(packets) Pakete", "\(name): HotSync running through Cradle – \(packets) packets")
+    }
 
     // MARK: - Anschlüsse
 
@@ -290,6 +359,13 @@ enum L10n {
 
     // MARK: - Ergebnis einer Sitzung
 
+    static func resultRelayed(_ time: String, _ packets: Int, _ bytes: Int, ended: Bool) -> String {
+        ended
+            ? s("\(time): HotSync über Cradle – \(packets) Pakete, \(bytes) Bytes",
+                "\(time): HotSync through Cradle – \(packets) packets, \(bytes) bytes")
+            : s("\(time): HotSync über Cradle abgebrochen nach \(packets) Paketen – siehe Protokoll",
+                "\(time): HotSync through Cradle cut short after \(packets) packets – see the log")
+    }
     static func resultFinished(_ time: String, _ installed: Int, _ failed: Int) -> String {
         failed == 0
             ? s("\(time): \(installed) Datei(en) installiert", "\(time): \(installed) file(s) installed")
@@ -495,6 +571,23 @@ enum L10n {
         "Palm verbunden: \(identity(name, userId)) – \(files) Datei(en) zu installieren",
         "Palm connected: \(identity(name, userId)) – \(files) file(s) to install"
     ) }
+    static var logRelayNoAddress: String { s(
+        "Keine Cradle-Adresse eingetragen – HotSync beendet, nichts weitergereicht",
+        "No Cradle address set – HotSync ended, nothing relayed"
+    ) }
+    static func logRelayStarting(_ target: String) -> String { s(
+        "Verbinde mit Cradle unter \(target) …", "Connecting to Cradle at \(target) …"
+    ) }
+    static func logRelayStarted(_ target: String) -> String { s(
+        "Verbunden mit \(target) – Cradle führt den HotSync", "Connected to \(target) – Cradle runs the HotSync"
+    ) }
+    static func logRelayFinished(_ packets: Int, _ bytes: Int, ended: Bool) -> String {
+        ended
+            ? s("Cradle hat den HotSync beendet: \(packets) Pakete, \(bytes) Bytes durchgereicht",
+                "Cradle ended the HotSync: \(packets) packets, \(bytes) bytes relayed")
+            : s("Verbindung abgebrochen nach \(packets) Paketen, \(bytes) Bytes",
+                "Connection cut short after \(packets) packets, \(bytes) bytes")
+    }
     static func logPalmRejected(_ name: String, _ userId: UInt32) -> String { s(
         "Palm \(identity(name, userId)) gehört nicht hierher – nichts installiert",
         "Palm \(identity(name, userId)) does not belong here – nothing installed"

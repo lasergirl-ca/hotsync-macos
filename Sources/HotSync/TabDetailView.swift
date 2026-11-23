@@ -90,6 +90,45 @@ struct TabDetailView: View {
                         .font(.caption)
                         .foregroundStyle(.blue)
                 }
+                if tab.hotSyncMode.relays {
+                    HStack(spacing: 4) {
+                        Text(L10n.relayAddressLabel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField(L10n.relayAddressPlaceholder, text: Binding(
+                            get: { tab.relayAddress ?? "" },
+                            set: { appState.setRelayAddress($0, for: tab.id) }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
+                        .frame(width: 200)
+                    }
+                    .padding(.top, 2)
+                    .help(L10n.relayAddressHint)
+                    HStack(spacing: 4) {
+                        Text(L10n.relayPairLabel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField(L10n.relayPairPlaceholder, text: Binding(
+                            get: { tab.relayPairCode ?? "" },
+                            set: { appState.setRelayPairCode($0, for: tab.id) }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
+                        .frame(width: 120)
+                    }
+                    .help(L10n.relayPairHint)
+                    if let transport = tab.relayTransport {
+                        HStack(spacing: 6) {
+                            Label(L10n.relaySecureHeld(transport.port, transport.shortPin), systemImage: "lock.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Button(L10n.relayForget) { appState.forgetCradleKey(for: tab.id) }
+                                .controlSize(.mini)
+                        }
+                        .help(L10n.relaySecureHint)
+                    }
+                }
             }
 
             Spacer()
@@ -219,7 +258,7 @@ struct TabDetailView: View {
 
     private var phaseColor: Color {
         switch phase {
-        case .restoring, .syncing, .backingUp, .readingCalendar, .dumpingROM: return .blue
+        case .restoring, .syncing, .backingUp, .readingCalendar, .dumpingROM, .relaying: return .blue
         case .listening: return .green
         case .waitingForPort: return .orange
         case .idle: return .gray
@@ -233,6 +272,7 @@ struct TabDetailView: View {
         case .backingUp: return "externaldrive.badge.timemachine"
         case .readingCalendar: return "calendar"
         case .dumpingROM: return "memorychip"
+        case .relaying: return "network"
         case .listening: return "antenna.radiowaves.left.and.right"
         case .waitingForPort: return "hourglass"
         case .idle: return "power.circle"
@@ -252,6 +292,8 @@ struct TabDetailView: View {
             return L10n.phaseReadingCalendar(user.name, database, done)
         case .dumpingROM(let user, let done, let total):
             return L10n.phaseDumpingROM(user.name, done, total)
+        case .relaying(let user, let packets):
+            return L10n.phaseRelaying(user.name, packets)
         case .listening:
             return appState.isStarted(tab.id) ? L10n.phaseListeningTargeted : L10n.phaseListeningAuto
         case .waitingForPort:
@@ -402,6 +444,7 @@ struct TabDetailView: View {
     private func resultIcon(_ result: TabStatus.Result) -> String {
         switch result {
         case .finished(_, _, let failed): return failed > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
+        case .relayed(_, _, _, let ended): return ended ? "checkmark.circle.fill" : "xmark.octagon.fill"
         case .timedOut: return "clock.badge.exclamationmark"
         case .failed: return "xmark.octagon.fill"
         case .rejected: return "person.crop.circle.badge.exclamationmark"
@@ -412,6 +455,7 @@ struct TabDetailView: View {
     private func resultColor(_ result: TabStatus.Result) -> Color {
         switch result {
         case .finished(_, _, let failed): return failed > 0 ? .orange : .green
+        case .relayed(_, _, _, let ended): return ended ? .green : .red
         case .timedOut, .failed, .rejected: return .red
         case .stopped: return .secondary
         }
@@ -422,6 +466,8 @@ struct TabDetailView: View {
         switch result {
         case .finished(let date, let installed, let failed):
             return L10n.resultFinished(time(date), installed, failed)
+        case .relayed(let date, let packets, let bytes, let ended):
+            return L10n.resultRelayed(time(date), packets, bytes, ended: ended)
         case .timedOut(let date):
             return L10n.resultTimedOut(time(date))
         case .failed(let date, let message):
@@ -718,7 +764,7 @@ struct SyncLogo: View {
 
     private var isSyncing: Bool {
         switch phase {
-        case .restoring, .syncing, .backingUp, .readingCalendar, .dumpingROM: return true
+        case .restoring, .syncing, .backingUp, .readingCalendar, .dumpingROM, .relaying: return true
         default: return false
         }
     }

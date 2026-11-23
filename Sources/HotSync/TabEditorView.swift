@@ -81,6 +81,24 @@ struct TabEditorView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if draft.hotSyncMode.relays {
+                    TextField(L10n.relayAddressLabel, text: Binding(
+                        get: { draft.relayAddress ?? "" },
+                        set: { draft.relayAddress = $0 }
+                    ), prompt: Text(L10n.relayAddressPlaceholder))
+                    Text(L10n.relayAddressHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    TextField(L10n.relayPairLabel, text: Binding(
+                        get: { draft.relayPairCode ?? "" },
+                        set: { draft.relayPairCode = $0.isEmpty ? nil : $0 }
+                    ), prompt: Text(L10n.relayPairPlaceholder))
+                    Text(L10n.relayPairHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             if let duplicate {

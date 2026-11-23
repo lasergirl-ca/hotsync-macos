@@ -112,6 +112,39 @@ private func imageWithVersion(_ version: String?) -> Data {
             == .userWritten(PalmUser(name: "Palm User", userId: 4711)))
 }
 
+@Test func relayEvents() {
+    #expect(SessionEvent.parse(#"{"event":"relayStarted","target":"cradle.local:14238","secure":0}"#)
+            == .relayStarted(target: "cradle.local:14238", secure: false))
+    #expect(SessionEvent.parse(#"{"event":"relayStarted","target":"cradle.local","secure":1,"tlsPort":14243}"#)
+            == .relayStarted(target: "cradle.local", secure: true))
+    #expect(SessionEvent.parse(#"{"event":"relayed","packets":25,"bytes":4096}"#)
+            == .relayed(packets: 25, bytes: 4096))
+    #expect(SessionEvent.parse(#"{"event":"relayFinished","packets":312,"bytes":98765,"ended":1}"#)
+            == .relayFinished(packets: 312, bytes: 98765, ended: true))
+    #expect(SessionEvent.parse(#"{"event":"relayFinished","packets":3,"bytes":90,"ended":0}"#)
+            == .relayFinished(packets: 3, bytes: 90, ended: false))
+    #expect(SessionEvent.parse(#"{"event":"error","stage":"relay","message":"cannot connect to cradle:14238 (Connection refused)"}"#)
+            == .error(stage: "relay", message: "cannot connect to cradle:14238 (Connection refused)"))
+}
+
+@Test func relayAuthEvents() {
+    #expect(SessionEvent.parse(#"{"event":"relayKey","fingerprint":"0e02a50225b4baaa"}"#)
+            == .relayKey(fingerprint: "0e02a50225b4baaa"))
+    let enrolled = SessionEvent.parse(#"{"event":"relayAuth","action":1,"code":0,"fingerprint":"0e02a50225b4baaa"}"#)
+    #expect(enrolled == .relayAuth(RelayAuth(action: 1, code: 0, fingerprint: "0e02a50225b4baaa")))
+    if case .relayAuth(let a) = enrolled! {
+        #expect(a.kind == .enrol && a.ok)
+    }
+    let pin = String(repeating: "ab", count: 32)
+    #expect(SessionEvent.parse(#"{"event":"relayAuth","action":4,"code":0,"tlsPort":14243,"name":"airlock.cradle","pin":"\#(pin)"}"#)
+            == .relayAuth(RelayAuth(action: 4, code: 0, port: 14243, name: "airlock.cradle", pin: pin)))
+    #expect(SessionEvent.parse(#"{"event":"relayAuth","action":6,"code":0,"accepted":1}"#)
+            == .relayAuth(RelayAuth(action: 6, code: 0, accepted: true)))
+    #expect(SessionEvent.parse(#"{"event":"relayAuth","action":2,"code":7}"#)
+            == .relayAuth(RelayAuth(action: 2, code: 7)))
+    #expect(SessionEvent.parse(#"{"event":"relayAuth","code":0}"#) == nil)
+}
+
 @Test func sessionFailures() {
     #expect(SessionEvent.parse(#"{"event":"failed","file":"a.prc","reason":"palmError","error":-301,"palmOSError":9}"#)
             == .failed(file: "a.prc", .protectedOnPalm))
