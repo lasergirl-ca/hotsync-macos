@@ -143,13 +143,43 @@ final class TabStore {
 
     private let tabsURL: URL
     private let chainsURL: URL
+    /// Tabs aus tabs.json, die diese Version nicht lesen kann (ein Modus
+    /// aus einem neueren oder anderen Build): sie bleiben, wie sie sind,
+    /// und werden beim Speichern unverändert zurückgeschrieben, damit ein
+    /// älterer Build sie nicht verliert.
+    private var foreignTabs: [[String: Any]] = []
+    /// tabs.json war da, ließ sich aber gar nicht lesen: dann wird nichts
+    /// gespeichert, sonst überschriebe eine leere Liste die Datei.
+    private var tabsUnreadable = false
 
     init() {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("HotSync")
         tabsURL = dir.appendingPathComponent("tabs.json")
         chainsURL = dir.appendingPathComponent("chains.json")
-        tabs = load(tabsURL) ?? []
+        loadTabs()
         chains = load(chainsURL) ?? []
+    }
+
+    /// Liest tabs.json Tab für Tab: was sich lesen lässt, ist ein Tab; was
+    /// nicht, bleibt als Rohdaten erhalten (siehe `foreignTabs`).
+    private func loadTabs() {
+        guard let data = try? Data(contentsOf: tabsURL) else { return }
+        guard let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
+            DebugLog.shared.log(L10n.logLoadError("tabs.json: not a list of tabs; nothing will be saved to it"), source: "App")
+            tabsUnreadable = true
+            return
+        }
+        var read: [SyncTab] = []
+        for entry in list {
+            do {
+                let one = try JSONSerialization.data(withJSONObject: entry)
+                read.append(try JSONDecoder().decode(SyncTab.self, from: one))
+            } catch {
+                foreignTabs.append(entry)
+                DebugLog.shared.log(L10n.logTabKept(entry["id"] as? String ?? "?", "\(error)"), source: "App")
+            }
+        }
+        tabs = read
     }
 
     /// true, wenn es noch keine tabs.json gibt (erster Start von 1.1).
@@ -235,7 +265,25 @@ final class TabStore {
         }
     }
 
-    private func saveTabs() { write(tabs, to: tabsURL) }
+    private func saveTabs() {
+        guard !tabsUnreadable else {
+            DebugLog.shared.log(L10n.logSaveError("tabs.json: left as it is, it could not be read at start"), source: "App")
+            return
+        }
+        guard !foreignTabs.isEmpty else {
+            write(tabs, to: tabsURL)
+            return
+        }
+        // die eigenen Tabs als JSON, die fremden unverändert dahinter
+        do {
+            let encoded = try JSONEncoder().encode(tabs)
+            let own = (try JSONSerialization.jsonObject(with: encoded)) as? [[String: Any]] ?? []
+            let data = try JSONSerialization.data(withJSONObject: own + foreignTabs, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: tabsURL, options: .atomic)
+        } catch {
+            DebugLog.shared.log(L10n.logSaveError("tabs.json: \(error)"), source: "App")
+        }
+    }
     private func saveChains() { write(chains, to: chainsURL) }
 
     private func write<T: Encodable>(_ value: T, to url: URL) {

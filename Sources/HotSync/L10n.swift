@@ -1163,6 +1163,10 @@ enum L10n {
     static func logChainStarted(_ name: String) -> String { s("Kette „\(name)“ gestartet", "Chain “\(name)” started") }
     static func logChainFinished(_ name: String) -> String { s("Kette „\(name)“ fertig", "Chain “\(name)” finished") }
     static func logChainCancelled(_ name: String) -> String { s("Kette „\(name)“ abgebrochen", "Chain “\(name)” cancelled") }
+    static func logTabKept(_ id: String, _ reason: String) -> String { s(
+        "Tab \(id) aus tabs.json kennt diese Version nicht (\(reason)); er bleibt in der Datei, wird aber nicht angezeigt",
+        "Tab \(id) in tabs.json is unknown to this version (\(reason)); it stays in the file but is not shown"
+    ) }
     static func logTabsMigrated(_ n: Int) -> String { s(
         "\(n) Tab(s) aus den bisherigen Profilen angelegt (USB, automatisch lauschen)",
         "Created \(n) tab(s) from the existing profiles (USB, listen automatically)"
