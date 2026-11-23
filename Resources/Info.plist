@@ -58,6 +58,8 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<false/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>HotSync reads and writes the Notes folders you choose to sync them with your Palm's memos.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>HotSync reads the calendars you choose to put them on your Palm.</string>
 	<key>NSContactsUsageDescription</key>

@@ -24,6 +24,8 @@ final class AppState {
     let calendarSource = CalendarSource()
     let contactSource = ContactSource()
     let reminderSource = ReminderSource()
+    /// Notes.app über osascript; hält nichts, die Freigabe liegt beim System
+    let noteSource = NoteSource()
     let portMonitor = PortMonitor()
 
     private(set) var queues: [UUID: InstallQueue] = [:]
@@ -1138,6 +1140,42 @@ final class AppState {
         refreshTaskPreview(for: profileId)
     }
 
+    func setMemoTwoWay(_ on: Bool, for profileId: UUID) {
+        guard var profile = deviceManager.profile(profileId) else { return }
+        profile.memoTwoWay = on
+        deviceManager.updateProfile(profile)
+    }
+
+    func setMemoSync(_ settings: MemoSyncSettings, for profileId: UUID) {
+        guard var profile = deviceManager.profile(profileId) else { return }
+        profile.memoSync = settings
+        deviceManager.updateProfile(profile)
+        refreshMemoPreview(for: profileId)
+    }
+
+    private(set) var memoPreviews: [UUID: String] = [:]
+
+    func memoPreview(for profileId: UUID) -> String? { memoPreviews[profileId] }
+
+    func refreshMemoPreview(for profileId: UUID) {
+        let key = "memos-\(profileId)"
+        previewTasks[key]?.cancel()
+        guard let settings = deviceManager.profile(profileId)?.memoSync, !settings.folders.isEmpty,
+              noteSource.accessStatus == .allowed else {
+            if memoPreviews[profileId] != nil { memoPreviews[profileId] = nil }
+            return
+        }
+        let source = noteSource
+        previewTasks[key] = Task { [weak self] in
+            let text: String? = await Task.detached {
+                guard let run = try? MemoSyncRun(settings: settings, source: source) else { return nil }
+                return L10n.memoSyncPreview(run.report.records, run.report.categories.count - 1, run.report.truncated)
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.memoPreviews[profileId] = text
+        }
+    }
+
     private(set) var taskPreviews: [UUID: String] = [:]
 
     func taskPreview(for profileId: UUID) -> String? { taskPreviews[profileId] }
@@ -1297,6 +1335,8 @@ final class AppState {
 
         let mode = tabStore.tab(tabId)?.hotSyncMode ?? .installBackup
         let palmOS = PalmOSVersion(rom: session.romVersion)
+        // Abgleiche, deren Mac-Seite asynchron liefert (Erinnerungen, Notizen)
+        var deferred: [@MainActor () async -> Void] = []
         if mode.syncs, let profile = deviceManager.profile(profileId) {
             let dry = profile.isDryRun
             if dry { tabLog(tabId, L10n.logDryRun) }
@@ -1305,7 +1345,7 @@ final class AppState {
             // die Zeitzonen (locL*) gibt es dort nicht
             let family = palmOS.pimFamily
             if family == .classic, profile.calendarSync?.enabled == true || profile.contactSync?.enabled == true
-                || profile.taskSync?.enabled == true {
+                || profile.taskSync?.enabled == true || profile.memoSync?.enabled == true {
                 tabLog(tabId, L10n.logPalmOSClassic(palmOS.description))
             }
             // CradleSync auf dem Palm: ein Cradle-Server gleicht Kalender,
@@ -1395,17 +1435,40 @@ final class AppState {
                 } else {
                     if !dry { session.checkDatabases.append(family.databaseName(.tasks)) }
                     // Reminders liefert asynchron; der Palm wartet solange (Lebenszeichen)
-                    Task { @MainActor [weak self, weak session] in
-                        guard let self, let session else { return }
-                        await self.queueTasks(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears,
-                                              family: family)
-                        self.startQueue(session, profileId: profileId, tabId: tabId, user: user, queue: queue, mode: mode)
+                    let dateFixYears = session.dateFixYears
+                    deferred.append { [weak self] in
+                        await self?.queueTasks(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: dateFixYears,
+                                               family: family)
                     }
-                    return
+                }
+            }
+            if pimSync, let settings = profile.memoSync, settings.enabled {
+                if profile.lastBackupAt == nil {
+                    tabLog(tabId, L10n.logMemosNeedBackup)
+                } else if profile.isMemoTwoWay {
+                    session.twoWayDatabases.append(family.databaseName(.memos))
+                    tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayMemos))
+                } else if settings.folders.isEmpty {
+                    tabLog(tabId, L10n.logNothingChosen(L10n.twoWayMemos, family.databaseName(.memos)))
+                } else {
+                    if !dry { session.checkDatabases.append(family.databaseName(.memos)) }
+                    // Notes antwortet über osascript, abseits des Hauptthreads
+                    deferred.append { [weak self] in
+                        await self?.queueMemos(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, family: family)
+                    }
                 }
             }
         }
-        startQueue(session, profileId: profileId, tabId: tabId, user: user, queue: queue, mode: mode)
+        guard !deferred.isEmpty else {
+            startQueue(session, profileId: profileId, tabId: tabId, user: user, queue: queue, mode: mode)
+            return
+        }
+        // was asynchron gebaut wird, der Reihe nach; dann erst die Warteschlange
+        Task { @MainActor [weak self, weak session] in
+            for job in deferred { await job() }
+            guard let self, let session else { return }
+            self.startQueue(session, profileId: profileId, tabId: tabId, user: user, queue: queue, mode: mode)
+        }
     }
 
     /// Die Warteschlange ist vollständig: was von ihr auf den Palm geht,
@@ -1645,6 +1708,7 @@ final class AppState {
         switch PalmPIMFamily.kind(ofDatabase: database) {
         case .contacts: return L10n.twoWayContacts
         case .tasks: return L10n.twoWayTasks
+        case .memos: return L10n.twoWayMemos
         default: return L10n.twoWayCalendar
         }
     }
@@ -1660,7 +1724,7 @@ final class AppState {
     /// der Palm gerade als letzten PC führt (sonst die erste gefundene).
     private func syncPCID(for profile: DeviceProfile, session: Session) -> UInt32 {
         if let id = profile.syncPCID { return id }
-        let files = ["calendar-mirror.json", "contacts-mirror.json", "tasks-mirror.json"]
+        let files = ["calendar-mirror.json", "contacts-mirror.json", "tasks-mirror.json", "memos-mirror.json"]
         let found = files.compactMap { file -> UInt32? in
             guard let data = try? Data(contentsOf: mirrorURL(file, for: profile)),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -1688,6 +1752,7 @@ final class AppState {
         switch session.twoWayCurrent.flatMap(PalmPIMFamily.kind(ofDatabase:)) {
         case .contacts: twoWayContacts(session, profile: profile)
         case .tasks: twoWayTasks(session, profile: profile)
+        case .memos: twoWayMemos(session, profile: profile)
         default: twoWayCalendar(session, profile: profile)
         }
     }
@@ -2050,6 +2115,61 @@ final class AppState {
         }
     }
 
+    private func twoWayMemos(_ session: Session, profile: DeviceProfile) {
+        // die Memos schließen die Datenbank selbst (asynchron), auch bei jedem frühen Ende
+        guard let tabId = session.tabId, let settings = profile.memoSync else {
+            session.runner.send("closedb")
+            return
+        }
+        guard noteSource.hasAccess else {
+            tabLog(tabId, L10n.logMemosNoAccess)
+            session.runner.send("closedb")
+            return
+        }
+        let family = pimFamily(session)
+        guard let appInfoData = session.calendarAppInfo, let categories = family.categories(ofAppInfo: appInfoData, kind: .memos) else {
+            tabLog(tabId, L10n.logTwoWayFailed("\(family.databaseName(.memos)): AppInfo"))
+            session.runner.send("closedb")
+            return
+        }
+        // der AppInfo des Palms (Sortierung) bleibt, ob Memo Pad oder Memos
+        let palmAppInfo = (try? MemoAppInfo(data: appInfoData)) ?? MemoAppInfo(categories: categories)
+        // Notes antwortet über osascript, abseits des Hauptthreads; der Palm wartet solange (Lebenszeichen)
+        let source = noteSource
+        let folderIDs = settings.folders.map(\.id)
+        Task { @MainActor [weak self, weak session] in
+            guard let self, let session else { return }
+            let notes: [MacNote]
+            do {
+                notes = try await Task.detached { try source.notes(in: folderIDs) }.value
+            } catch {
+                self.tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
+                session.runner.send("closedb")
+                return
+            }
+            let builder = MemosBuilder(options: .init(folders: settings.folders.map { .init(id: $0.id, title: $0.title) },
+                                                      maxBytes: family.memoTextLimit))
+            let engine = SyncEngine<SyncedMemo>(conflictPolicy: settings.conflicts)
+            let folders = settings.folders
+            let writer = NoteWriter(source: source, limit: family.memoLimit, fallback: folders.first?.id) { category in
+                folders.first { String($0.title.prefix(CategoryAppInfo.nameWidth - 1)) == category }?.id
+            }
+            self.twoWayRun(session, profile: profile, what: L10n.twoWayMemos, mirrorFile: "memos-mirror.json", engine: engine,
+                           palmCategories: categories.names, mac: family.limited(builder.syncItems(notes)),
+                           titleOf: { (try? PalmMemo(data: $0)).map { SyncedMemo($0, category: "").title ?? "" } },
+                           applyMac: { plan in
+                               let r = writer.apply(plan)
+                               return (r.createdKeys, r.updated, r.deleted, r.failures, r.failedEntries)
+                           },
+                           palmDatabase: { plan in
+                               let (db, ids, categories) = plan.palmDatabase(appInfo: palmAppInfo)
+                               let appInfo = family.classicAppInfo(kind: .memos, existing: appInfoData, categories: categories)
+                               return (family.deviceDatabase(db, kind: .memos, appInfo: appInfo), ids)
+                           },
+                           completion: { session.runner.send("closedb") })
+        }
+    }
+
     /// Die zusammengeführte Datenbank ist auf dem Palm: Spiegel speichern,
     /// diesen Mac als letzten PC eintragen.
     private func twoWayInstalled(_ session: Session) {
@@ -2174,6 +2294,27 @@ final class AppState {
             tabLog(tabId, L10n.logTasksNoAccess)
         } catch {
             tabLog(tabId, L10n.logTasksFailed(error.localizedDescription))
+        }
+    }
+
+    /// Baut MemosDB-PMem aus Notes.app und legt es in die Warteschlange.
+    private func queueMemos(_ settings: MemoSyncSettings, profileId: UUID, tabId: UUID, queue: InstallQueue, dryRun: Bool,
+                            family: PalmPIMFamily = .garnet) async {
+        guard let profile = deviceManager.profile(profileId) else { return }
+        let source = noteSource
+        do {
+            let run = try await Task.detached { try MemoSyncRun(settings: settings, source: source, family: family) }.value
+            let name = family.databaseName(.memos)
+            let url = try syncTarget(name, for: profile, dryRun: dryRun)
+            let bytes = try writeDatabase(run.database, to: url)
+            if dryRun { tabLog(tabId, L10n.logDryRunWouldInstall(name, run.report.records, bytes)); return }
+            queue.refresh()
+            tabLog(tabId, L10n.logMemosQueued(run.report.records, run.report.categories.count - 1, name, bytes))
+            for warning in run.report.warnings { tabLog(tabId, L10n.logMemosWarning(warning)) }
+        } catch MemoSyncRun.Failure.noAccess {
+            tabLog(tabId, L10n.logMemosNoAccess)
+        } catch {
+            tabLog(tabId, L10n.logMemosFailed(error.localizedDescription))
         }
     }
 

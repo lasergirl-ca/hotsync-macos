@@ -19,6 +19,8 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     var contactSync: ContactSyncSettings?
     /// Aufgaben-Abgleich Mac → Palm: welche Erinnerungslisten; nil = nie eingerichtet
     var taskSync: TaskSyncSettings?
+    /// Memo-Abgleich Mac → Palm: welche Notizen-Ordner; nil = nie eingerichtet
+    var memoSync: MemoSyncSettings?
     /// Probelauf für den ganzen HotSync: die Abgleiche (Kalender, Kontakte,
     /// Aufgaben, Uhr, Zeitzonen) schreiben auf keiner Seite etwas, nur ins
     /// Log, was sie tun würden. Sicherung und abgelegte Dateien laufen.
@@ -28,9 +30,10 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     /// Kalender des Macs ersetzt den des Palms.
     var calendarTwoWay: Bool?
 
-    /// Kontakte und Aufgaben ebenso in beide Richtungen.
+    /// Kontakte, Aufgaben und Memos ebenso in beide Richtungen.
     var contactTwoWay: Bool?
     var taskTwoWay: Bool?
+    var memoTwoWay: Bool?
 
     /// Viele Löschungen auf einmal beim nächsten Abgleich zulassen; wird
     /// nach dem HotSync, der sie gebraucht hat, wieder ausgeschaltet.
@@ -52,6 +55,7 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     var isCalendarTwoWay: Bool { calendarTwoWay ?? false }
     var isContactTwoWay: Bool { contactTwoWay ?? false }
     var isTaskTwoWay: Bool { taskTwoWay ?? false }
+    var isMemoTwoWay: Bool { memoTwoWay ?? false }
     var isCradleSyncSeen: Bool { cradleSyncSeen ?? false }
     var isCradleSharedSync: Bool { cradleSharedSync ?? false }
     /// Die Uhr des Palms bei jedem HotSync vom Mac stellen; nil = aus

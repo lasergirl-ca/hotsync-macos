@@ -216,8 +216,8 @@ enum L10n {
     }
     static var tabSyncMode: String { s("HotSync", "HotSync") }
     static var tabSyncModeHint: String { s(
-        "„Abgleichen“ ist der Abgleich von Kalender, Kontakten, Aufgaben, Uhr und Zeitzonen, wie er für diesen Palm eingestellt ist; „Installieren“ die Warteschlange; „Sichern“ holt nach den Installationen die Datenbanken im RAM des Palms auf den Mac – beim ersten Mal alle, danach nur die geänderten. Für einen langsamen seriellen Tab kann „Nur installieren“ sinnvoll sein.",
-        "“Sync” is the Calendar, Contacts, Tasks, clock and time-zone sync as set up for this Palm; “Install” the queue; “Back Up” fetches the Palm's RAM databases to the Mac after the installs – all of them the first time, then only the changed ones. For a slow serial tab, “Install Only” can make sense."
+        "„Abgleichen“ ist der Abgleich von Kalender, Kontakten, Aufgaben, Memos, Uhr und Zeitzonen, wie er für diesen Palm eingestellt ist; „Installieren“ die Warteschlange; „Sichern“ holt nach den Installationen die Datenbanken im RAM des Palms auf den Mac – beim ersten Mal alle, danach nur die geänderten. Für einen langsamen seriellen Tab kann „Nur installieren“ sinnvoll sein.",
+        "“Sync” is the Calendar, Contacts, Tasks, Memos, clock and time-zone sync as set up for this Palm; “Install” the queue; “Back Up” fetches the Palm's RAM databases to the Mac after the installs – all of them the first time, then only the changed ones. For a slow serial tab, “Install Only” can make sense."
     ) }
     static func modeName(_ mode: HotSyncMode) -> String {
         switch mode {
@@ -572,8 +572,8 @@ enum L10n {
     static var dryRunTitle: String { s("Probelauf", "Dry run") }
     static var dryRunToggle: String { s("Probelauf: nichts schreiben, nur ins Log", "Dry run: write nothing, only log") }
     static var dryRunHint: String { s(
-        "Gilt für alle Abgleiche dieses Palms: Kalender, Kontakte, Aufgaben, Uhr und Zeitzonen schreiben auf keiner Seite etwas und tragen ins Log ein, was sie tun würden. Die Sicherung läuft; in die Warteschlange gelegte Dateien werden trotzdem installiert.",
-        "Applies to every sync of this Palm: Calendar, Contacts, Tasks, clock and time zones write nothing on either side and log what they would do. The backup still runs; files dropped into the queue are still installed."
+        "Gilt für alle Abgleiche dieses Palms: Kalender, Kontakte, Aufgaben, Memos, Uhr und Zeitzonen schreiben auf keiner Seite etwas und tragen ins Log ein, was sie tun würden. Die Sicherung läuft; in die Warteschlange gelegte Dateien werden trotzdem installiert.",
+        "Applies to every sync of this Palm: Calendar, Contacts, Tasks, Memos, clock and time zones write nothing on either side and log what they would do. The backup still runs; files dropped into the queue are still installed."
     ) }
     static var logWakeRestart: String { s(
         "Aufgewacht: Listener werden neu gestartet", "Woke up: restarting the listeners"
@@ -634,12 +634,12 @@ enum L10n {
         "Palm OS \(version): Calendar, Contacts, Tasks and time zones need Palm OS 5.2 or later – skipped"
     ) }
     static func logPalmOSClassic(_ version: String) -> String { s(
-        "Palm OS \(version): Datebook, Address und To Do – Ort, Geburtstag, IM, Webseite, Alarm und Wiederholung von Aufgaben kennt der Palm nicht, sie bleiben auf dem Mac",
-        "Palm OS \(version): Datebook, Address and To Do – the Palm has no location, birthday, IM, web site, task alarm or task repeat; those stay on the Mac"
+        "Palm OS \(version): Datebook, Address, To Do und Memo Pad – Ort, Geburtstag, IM, Webseite, Alarm und Wiederholung von Aufgaben kennt der Palm nicht, sie bleiben auf dem Mac; ein Memo fasst 4 KB",
+        "Palm OS \(version): Datebook, Address, To Do and Memo Pad – the Palm has no location, birthday, IM, web site, task alarm or task repeat; those stay on the Mac; a memo holds 4 KB"
     ) }
     static func palmOSClassic(_ version: String) -> String { s(
-        "Dieser Palm hat Palm OS \(version) mit Datebook, Address und To Do. Kalender, Kontakte und Aufgaben werden über diese Programme abgeglichen; was der Palm nicht hat (Ort, Geburtstag, IM, Webseite, Alarm und Wiederholung bei Aufgaben, mehr als fünf Telefonnummern oder eine Adresse), bleibt auf dem Mac. Zeitzonen gibt es erst ab Palm OS 5.2.",
-        "This Palm runs Palm OS \(version) with Datebook, Address and To Do. Calendar, Contacts and Tasks sync through those; what the Palm has no field for (location, birthday, IM, web site, task alarms and repeats, more than five phone numbers or one address) stays on the Mac. Time zones need Palm OS 5.2 or later."
+        "Dieser Palm hat Palm OS \(version) mit Datebook, Address, To Do und Memo Pad. Kalender, Kontakte, Aufgaben und Memos werden über diese Programme abgeglichen; was der Palm nicht hat (Ort, Geburtstag, IM, Webseite, Alarm und Wiederholung bei Aufgaben, mehr als fünf Telefonnummern oder eine Adresse, mehr als 4 KB je Memo), bleibt auf dem Mac. Zeitzonen gibt es erst ab Palm OS 5.2.",
+        "This Palm runs Palm OS \(version) with Datebook, Address, To Do and Memo Pad. Calendar, Contacts, Tasks and Memos sync through those; what the Palm has no field for (location, birthday, IM, web site, task alarms and repeats, more than five phone numbers or one address, more than 4 KB per memo) stays on the Mac. Time zones need Palm OS 5.2 or later."
     ) }
     static func palmOSTooOld(_ version: String) -> String { s(
         "Dieser Palm hat Palm OS \(version). Der Abgleich von Kalender, Kontakten und Aufgaben und die Zeitzonen brauchen die Garnet-Programme ab Palm OS 5.2 (Tungsten T3 und neuer); Installieren, Sichern und Zurückspielen gehen wie immer.",
@@ -688,6 +688,10 @@ enum L10n {
         "Der HotSync liest die Aufgaben des Palms, führt sie Feld für Feld mit dem Mac zusammen und schreibt beide Seiten: Mac-Änderungen über EventKit in Erinnerungen.app (und damit in iCloud), der Palm bekommt die zusammengeführten Aufgaben als Ganzes.",
         "The HotSync reads the Palm's tasks, merges them field by field with the Mac and writes both sides: Mac changes through EventKit into Reminders.app (and on to iCloud), the Palm gets the merged tasks whole."
     ) }
+    static var twoWayHintMemos: String { s(
+        "Der HotSync liest die Memos des Palms, führt sie mit den Notizen des Macs zusammen und schreibt beide Seiten: Mac-Änderungen über die AppleScript-Schnittstelle von Notizen.app (und damit in iCloud), der Palm bekommt die zusammengeführten Memos als Ganzes. Nur Text: Formatierung, Anhänge und Bilder einer Notiz bleiben auf dem Mac, und eine auf dem Palm geänderte Notiz kommt als reiner Text zurück.",
+        "The HotSync reads the Palm's memos, merges them with the Mac's notes and writes both sides: Mac changes through the AppleScript interface of Notes.app (and on to iCloud), the Palm gets the merged memos whole. Text only: a note's formatting, attachments and images stay on the Mac, and a note edited on the Palm comes back as plain text."
+    ) }
     static var twoWayHint: String { s(
         "Der HotSync liest den Kalender des Palms, führt ihn Feld für Feld mit dem Mac zusammen und schreibt beide Seiten: Mac-Änderungen über EventKit in Kalender.app (und damit in iCloud/Google), der Palm bekommt den zusammengeführten Kalender als Ganzes. Beim ersten Mal lohnt sich ein Probelauf.",
         "The HotSync reads the Palm's calendar, merges it field by field with the Mac and writes both sides: Mac changes through EventKit into Calendar.app (and on to iCloud/Google), the Palm gets the merged calendar whole. A dry run first is worth it."
@@ -695,6 +699,7 @@ enum L10n {
     static var twoWayCalendar: String { s("Kalender", "Calendar") }
     static var twoWayContacts: String { s("Kontakte", "Contacts") }
     static var twoWayTasks: String { s("Aufgaben", "Tasks") }
+    static var twoWayMemos: String { s("Memos", "Memos") }
     static func logTwoWayPending(_ what: String) -> String { s(
         "\(what): Abgleich in beide Richtungen nach der Sicherung",
         "\(what): two-way sync after the backup; nothing is installed whole"
@@ -786,6 +791,46 @@ enum L10n {
     static var logTasksNeedBackup: String { s(
         "Aufgaben noch nicht auf den Palm gespielt: erst muss eine Sicherung dieses Palms da sein (dieser HotSync legt sie an)",
         "Tasks not put on the Palm yet: a backup of this Palm has to exist first (this HotSync makes it)"
+    ) }
+    static var memoSyncTitle: String { s("Memos: Mac → Palm", "Memos: Mac → Palm") }
+    static var memoSyncTitleTwoWay: String { s("Memos: Mac ↔ Palm", "Memos: Mac ↔ Palm") }
+    static var memoSyncToggle: String { s("Memos abgleichen", "Sync Memos") }
+    static var memoSyncChoose: String { s("Ordner wählen", "Choose folders") }
+    static var memoSyncWarning: String { s(
+        "Die Memos des Palms werden dabei ersetzt: Einträge, die auf dem Palm geändert wurden, gehen verloren.",
+        "The Palm's memos are replaced: entries edited on the Palm are lost."
+    ) }
+    static var memoSyncAllow: String { s("Zugriff auf Notizen erlauben …", "Allow access to Notes …") }
+    static var memoSyncAllowHint: String { s(
+        "macOS fragt einmal, ob HotSync Notizen.app steuern darf (die Notizen werden über deren AppleScript-Schnittstelle gelesen und geschrieben).",
+        "macOS asks once whether HotSync may control Notes.app (notes are read and written through its AppleScript interface)."
+    ) }
+    static var memoSyncDenied: String { s(
+        "Kein Zugriff auf Notizen: in den Systemeinstellungen unter Datenschutz & Sicherheit › Automation bei HotSync „Notizen“ erlauben",
+        "No access to Notes: allow “Notes” for HotSync in System Settings under Privacy & Security › Automation"
+    ) }
+    static var memoSyncHint: String { s(
+        "Jeder Ordner wird zu einer Kategorie auf dem Palm (bis 15). Nur Text: die erste Zeile ist der Titel, Formatierung, Anhänge und Bilder bleiben auf dem Mac; ein Memo fasst 4 KB (Memo Pad) oder 32 KB (Memos).",
+        "Each folder becomes a category on the Palm (up to 15). Text only: the first line is the title; formatting, attachments and images stay on the Mac; a memo holds 4 KB (Memo Pad) or 32 KB (Memos)."
+    ) }
+    static var memoSyncNoFolders: String { s("Noch kein Ordner gewählt", "No folder chosen yet") }
+    static func memoSyncPreview(_ records: Int, _ categories: Int, _ truncated: Int) -> String { s(
+        "\(records) Memos beim nächsten HotSync (\(categories) Kategorien, \(truncated) gekürzt)",
+        "\(records) memos at the next HotSync (\(categories) categories, \(truncated) cut short)"
+    ) }
+    static func logMemosQueued(_ records: Int, _ categories: Int, _ name: String, _ bytes: Int) -> String { s(
+        "Memos gebaut: \(records) Einträge in \(categories) Kategorien, \(name).pdb (\(bytes) Bytes) in der Warteschlange",
+        "Memos built: \(records) records in \(categories) categories, \(name).pdb (\(bytes) bytes) queued"
+    ) }
+    static func logMemosWarning(_ text: String) -> String { s("Memos: \(text)", "Memos: \(text)") }
+    static var logMemosNoAccess: String { s(
+        "Memos nicht gebaut: kein Zugriff auf Notizen (Systemeinstellungen › Datenschutz & Sicherheit › Automation)",
+        "Memos not built: no access to Notes (System Settings › Privacy & Security › Automation)"
+    ) }
+    static func logMemosFailed(_ reason: String) -> String { s("Memos nicht gebaut: \(reason)", "Memos not built: \(reason)") }
+    static var logMemosNeedBackup: String { s(
+        "Memos noch nicht auf den Palm gespielt: erst muss eine Sicherung dieses Palms da sein (dieser HotSync legt sie an)",
+        "Memos not put on the Palm yet: a backup of this Palm has to exist first (this HotSync makes it)"
     ) }
     static var timeSyncTitle: String { s("Uhr, Zeitzonen und Netzwerk", "Clock, time zones and network") }
     static var netSyncToggle: String { s(

@@ -15,5 +15,8 @@
     <true/>
     <key>com.apple.security.personal-information.addressbook</key>
     <true/>
+    <!-- Memos: Notes.app is driven through Apple events (osascript). -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
 </dict>
 </plist>
