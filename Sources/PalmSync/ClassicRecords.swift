@@ -1,8 +1,8 @@
 import Foundation
 
 // The record and AppInfo formats of the Palm OS 1-5.1 PIM applications
-// (Datebook, Address, To Do), as pilot-link's datebook.c, address.c and
-// todo.c read and write them. The sync works on the Garnet records
+// (Datebook, Address, To Do, Memo Pad), as pilot-link's datebook.c,
+// address.c, todo.c and memo.c read and write them. The sync works on the Garnet records
 // (CalendarEvent, Contact, PalmTask) throughout; these codecs convert at
 // the edge, see `PalmPIMFamily`.
 
@@ -356,5 +356,21 @@ public struct ClassicToDoAppInfo: Equatable, Sendable {
         w.u8(sortByPriority ? 1 : 0)
         w.u8(padding)
         return w.data
+    }
+}
+
+/// A Memo Pad record (database MemoDB, creator memo). It is the Memos
+/// record (`PalmMemo`), and the AppInfo block is `MemoAppInfo` with four
+/// bytes after the categories; this only says what a Memo Pad holds.
+public enum ClassicMemo {
+    public static let databaseName = "MemoDB"
+    public static let creator = "memo"
+    /// Memo Pad's text field takes 4 KB (memoMaxLength in Memo Pad's
+    /// sources; the NUL comes on top).
+    public static let textLimit = 4096
+
+    /// The memo a Memo Pad can hold: at most 4 KB of text.
+    public static func limit(_ memo: PalmMemo) -> PalmMemo {
+        PalmMemo(text: PalmMemo.truncated(memo.text, maxBytes: textLimit))
     }
 }

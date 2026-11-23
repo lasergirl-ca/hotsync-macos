@@ -245,7 +245,8 @@ private func classicFixture(_ name: String) throws -> PalmDatabase {
     #expect(PalmPIMFamily.kind(ofDatabase: "CalendarDB-PDat") == .calendar)
     #expect(PalmPIMFamily.family(ofDatabase: "AddressDB") == .classic)
     #expect(PalmPIMFamily.family(ofDatabase: "TasksDB-PTod") == .garnet)
-    #expect(PalmPIMFamily.kind(ofDatabase: "MemoDB") == nil)
+    #expect(PalmPIMFamily.kind(ofDatabase: "MemoDB") == .memos)
+    #expect(PalmPIMFamily.kind(ofDatabase: "ExpenseDB") == nil)
 }
 
 @Test func aClassicPalmSyncsThroughTheGarnetEngine() throws {

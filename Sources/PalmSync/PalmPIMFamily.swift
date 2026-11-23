@@ -2,9 +2,9 @@ import Foundation
 import HotSyncCore
 
 /// Which PIM applications a Palm runs: the Garnet ones of Palm OS 5.2 and
-/// later (Calendar, Contacts, Tasks: CalendarDB-PDat, ContactsDB-PAdd,
-/// TasksDB-PTod) or the classic ones before (Datebook, Address, To Do:
-/// DatebookDB, AddressDB, ToDoDB).
+/// later (Calendar, Contacts, Tasks, Memos: CalendarDB-PDat, ContactsDB-PAdd,
+/// TasksDB-PTod, MemosDB-PMem) or the classic ones before (Datebook,
+/// Address, To Do, Memo Pad: DatebookDB, AddressDB, ToDoDB, MemoDB).
 ///
 /// The sync engine, the mirrors, the builders and the Mac writers work on
 /// the Garnet records throughout. For a classic Palm the records are
@@ -17,7 +17,7 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
     case classic
 
     public enum Kind: String, Codable, Sendable, CaseIterable {
-        case calendar, contacts, tasks
+        case calendar, contacts, tasks, memos
     }
 
     // MARK: Databases
@@ -27,9 +27,11 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
         case (.garnet, .calendar): return CalendarBuilder.databaseName
         case (.garnet, .contacts): return ContactsBuilder.databaseName
         case (.garnet, .tasks): return TasksBuilder.databaseName
+        case (.garnet, .memos): return MemosBuilder.databaseName
         case (.classic, .calendar): return ClassicDatebook.databaseName
         case (.classic, .contacts): return ClassicAddress.databaseName
         case (.classic, .tasks): return ClassicToDo.databaseName
+        case (.classic, .memos): return ClassicMemo.databaseName
         }
     }
 
@@ -38,9 +40,11 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
         case (.garnet, .calendar): return "PDat"
         case (.garnet, .contacts): return "PAdd"
         case (.garnet, .tasks): return "PTod"
+        case (.garnet, .memos): return MemosBuilder.creator
         case (.classic, .calendar): return ClassicDatebook.creator
         case (.classic, .contacts): return ClassicAddress.creator
         case (.classic, .tasks): return ClassicToDo.creator
+        case (.classic, .memos): return ClassicMemo.creator
         }
     }
 
@@ -62,6 +66,11 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
 
     // MARK: Records at the edge
 
+    /// Bytes of text one memo holds: 4 KB on Memo Pad, 32 KB on Memos.
+    public var memoTextLimit: Int {
+        self == .classic ? ClassicMemo.textLimit : 32767
+    }
+
     /// The Garnet record for a record read from the Palm.
     public func garnetRecord(_ data: Data, kind: Kind) throws -> Data {
         guard self == .classic else { return data }
@@ -69,6 +78,7 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
         case .calendar: return try ClassicDatebook.calendarEvent(from: data).encode()
         case .contacts: return try ClassicAddress(data: data).contact.encode()
         case .tasks: return try ClassicToDo(data: data).palmTask.encode()
+        case .memos: return try PalmMemo(data: data).encode()   // the same record on both
         }
     }
 
@@ -79,6 +89,7 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
         case .calendar: return ClassicDatebook.limit(try CalendarEvent(data: data)).encode()
         case .contacts: return ClassicAddress(try Contact(data: data)).encode()
         case .tasks: return ClassicToDo(try PalmTask(data: data)).encode()
+        case .memos: return ClassicMemo.limit(try PalmMemo(data: data)).encode()
         }
     }
 
@@ -108,6 +119,12 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
         self == .classic ? ClassicToDo.limit(task) : task
     }
 
+    /// A memo cut to what this Palm's application holds; its text is
+    /// otherwise left alone.
+    public func limit(_ memo: PalmMemo) -> PalmMemo {
+        PalmMemo(text: PalmMemo.truncated(memo.text, maxBytes: memoTextLimit))
+    }
+
     /// The limit as the Mac writers take it: nil for Garnet, where the
     /// Palm holds every shared field.
     public var eventLimit: (@Sendable (SyncedEvent) -> SyncedEvent)? {
@@ -131,6 +148,15 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
             item.apply(to: &record)
             return SyncedTask(ClassicToDo.limit(record), category: item.category)
         }
+    }
+
+    /// The memo limit as the Mac writer takes it. Unlike the other kinds
+    /// this applies to a Garnet Palm as well: Memos has a limit too, and
+    /// the Mac's notes have formatting, spacing and characters no memo
+    /// holds (`PalmMemo.limited`).
+    public var memoLimit: @Sendable (SyncedMemo) -> SyncedMemo {
+        let maxBytes = memoTextLimit
+        return { SyncedMemo(text: PalmMemo.limited($0.text, maxBytes: maxBytes), category: $0.category) }
     }
 
     /// The Mac's items limited to what the Palm can hold, so that what
@@ -171,6 +197,20 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
         }
     }
 
+    /// The builder already limits a note to what Memos holds; a classic
+    /// Palm's Memo Pad holds less. The same cut as `memoLimit`, so the
+    /// writer sees the Mac's notes as the engine does.
+    public func limited(_ items: [MacSyncItem<SyncedMemo>]) -> [MacSyncItem<SyncedMemo>] {
+        guard self == .classic else { return items }
+        let limit = memoLimit
+        return items.map { item in
+            var i = item
+            i.item = limit(item.item)
+            i.palmRecord = PalmMemo(text: i.item.text).encode()
+            return i
+        }
+    }
+
     // MARK: Whole databases
 
     /// A database built for the Garnet application as the Palm of this
@@ -207,6 +247,11 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
             var info = existing.flatMap { try? ClassicToDoAppInfo(data: $0) } ?? ClassicToDoAppInfo()
             info.categories = categories
             return info.encode()
+        case .memos:
+            var info = existing.flatMap { try? MemoAppInfo(data: $0) }
+                ?? MemoAppInfo(internalSize: MemoAppInfo.classicInternalSize)
+            info.categories = categories
+            return info.encode()
         }
     }
 
@@ -219,6 +264,7 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
         case (.classic, .calendar): return (try? ClassicDatebookAppInfo(data: data))?.categories
         case (.classic, .contacts): return (try? ClassicAddressAppInfo(data: data))?.categories
         case (.classic, .tasks): return (try? ClassicToDoAppInfo(data: data))?.categories
+        case (_, .memos): return (try? MemoAppInfo(data: data))?.categories
         }
     }
 
@@ -232,6 +278,7 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
         case (.classic, .calendar): return (try? ClassicDatebook.calendarEvent(from: data))?.encode() == data
         case (.classic, .contacts): return (try? ClassicAddress(data: data))?.encode() == data
         case (.classic, .tasks): return (try? ClassicToDo(data: data))?.encode() == data
+        case (_, .memos): return (try? PalmMemo(data: data))?.encode() == data
         }
     }
 }
