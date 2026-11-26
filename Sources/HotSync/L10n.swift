@@ -699,6 +699,10 @@ enum L10n {
     static func logBackupSkipped(_ name: String) -> String { s(
         "\(name): nicht gesichert, der Palm schützt die Datenbank", "\(name): not backed up, the Palm protects the database"
     ) }
+    static func logBackupSkippedSchema(_ name: String) -> String { s(
+        "\(name): nicht gesichert, eine Schema-Datenbank von Palm OS Cobalt (noch nicht unterstützt)",
+        "\(name): not backed up, a Palm OS Cobalt schema database (not supported yet)"
+    ) }
     static var logMassAllowReset: String { s(
         "„Viele Änderungen zulassen“ ist wieder aus", "“Allow many changes” is off again"
     ) }

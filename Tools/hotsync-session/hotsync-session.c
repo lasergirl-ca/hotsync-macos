@@ -380,6 +380,143 @@ static void emit_backup_failed(const char *name, const char *reason, int sd)
 	emit_end();
 }
 
+/* ---- Palm OS Cobalt: erweiterte Datenbanken ---------------------------- */
+
+/* Cobalt (Palm OS 6) kennt neben den klassischen zwei weitere Familien von
+ * Datenbanken, in der Liste an den Flags zu erkennen: 0x1000 (Schema) und
+ * 0x2000 ohne 0x1000 (erweitert, etwa BootAppDB auf einem frischen Speicher).
+ * Eine erweiterte Datenbank öffnet Cobalts DLServer nur, wenn OpenDB (0x17)
+ * ein zweites Argument trägt: Kennung 0x21, genau 4 Bytes, der Creator der
+ * Datenbank. Ohne dieses Argument sucht er mit den Aufrufen für klassische
+ * Datenbanken und antwortet mit Palm-OS-Fehler 5, gleich welche Modusbits
+ * gesetzt sind. Beobachtet an Cobalts DLServer in der Nachstellung:
+ *   17 02  20 0c 00 80 "BootAppDB\0"  21 04 70 73 79 73   -> Handle 1
+ * Schema-Datenbanken gehen über eigene Befehle (0x80/0x81) und bleiben außen
+ * vor. pilot-links dlp_OpenDB hat kein zweites Argument, darum hier der rohe
+ * Aufruf, gebaut wie dlp.c seine eigenen Anfragen baut: dlp_request_new
+ * nummeriert die Argumente von 0x20 an durch, das zweite heißt also 0x21.
+ *
+ * Palm OS Cobalt (Palm OS 6) has two more database families beside the
+ * classic ones, told apart by the list flags: 0x1000 (schema) and 0x2000
+ * without 0x1000 (extended, e.g. BootAppDB on a fresh store). Cobalt's
+ * DLServer opens an extended database only when OpenDB (0x17) carries a
+ * second argument: id 0x21, exactly 4 bytes, the database's creator. Without
+ * it the server uses the lookup calls for classic databases and answers
+ * Palm OS error 5 whatever the mode bits. Observed in a replay against
+ * Cobalt's DLServer (see the request bytes above). Schema databases use
+ * their own commands (0x80/0x81) and are out of scope. pilot-link's
+ * dlp_OpenDB has no second argument, hence the raw request, built the way
+ * dlp.c builds its own: dlp_request_new numbers the arguments from 0x20
+ * on, so the second one is 0x21. */
+#define DLP_REQUEST_DATA(req, arg, offset) (&(req)->argv[arg]->data[offset])
+#define DLP_RESPONSE_DATA(res, arg, offset) (&(res)->argv[arg]->data[offset])
+
+static int is_extended_db(const struct DBInfo *info)
+{
+	return (info->flags & dlpDBFlagExtended) && !(info->flags & dlpDBFlagSchema);
+}
+
+/* OpenDB mit dem Creator als zweitem Argument; liest das Handle aus der
+ * Antwort wie dlp_OpenDB. Modus 0x80 (lesen), wie in der Nachstellung. */
+static int open_extended_db(int sd, int cardno, const struct DBInfo *info, int *dbhandle)
+{
+	struct dlpRequest *req;
+	struct dlpResponse *res = NULL;
+	size_t name_len = strlen(info->name);
+	int result;
+
+	pi_reset_errors(sd);
+	req = dlp_request_new(dlpFuncOpenDB, 2, 2 + name_len + 1, (size_t)4);
+	if (req == NULL)
+		return pi_set_error(sd, PI_ERR_GENERIC_MEMORY);
+	set_byte(DLP_REQUEST_DATA(req, 0, 0), cardno);
+	set_byte(DLP_REQUEST_DATA(req, 0, 1), dlpOpenRead);
+	memcpy(DLP_REQUEST_DATA(req, 0, 2), info->name, name_len + 1);
+	set_long(DLP_REQUEST_DATA(req, 1, 0), info->creator);
+
+	result = dlp_exec(sd, req, &res);
+	dlp_request_free(req);
+	if (result > 0)
+		*dbhandle = get_byte(DLP_RESPONSE_DATA(res, 0, 0));
+	dlp_response_free(res);
+	return result;
+}
+
+enum extended_stage { EXT_OK, EXT_OPEN_FAILED, EXT_READ_FAILED };
+
+/* Sichert eine erweiterte Datenbank in pf: öffnen mit Creator, danach
+ * dieselben Aufrufe wie pi_file_retrieve (ReadOpenDBInfo, AppInfo-Block,
+ * Datensätze oder Ressourcen der Reihe nach, CloseDB). Ob die klassischen
+ * Leseaufrufe bei einer erweiterten Datenbank mit Inhalt funktionieren,
+ * ist offen - darum sagt das Ergebnis, ob das Öffnen oder das Lesen
+ * scheiterte. Auf einem frischen Speicher hat BootAppDB keinen Eintrag. */
+static enum extended_stage retrieve_extended_db(pi_file_t *pf, int sd, const struct DBInfo *info,
+						progress_func report_progress)
+{
+	int db = -1, records = 0, result;
+	pi_buffer_t *buffer;
+	pi_progress_t progress;
+	int j;
+
+	if (open_extended_db(sd, 0, info, &db) < 0)
+		return EXT_OPEN_FAILED;
+	buffer = pi_buffer_new(DLP_BUF_SIZE);
+	if (buffer == NULL) {
+		dlp_CloseDB(sd, db);
+		return EXT_READ_FAILED;
+	}
+	if (dlp_ReadOpenDBInfo(sd, db, &records) < 0)
+		goto fail;
+
+	memset(&progress, 0, sizeof(progress));
+	progress.type = PI_PROGRESS_RECEIVE_DB;
+	progress.data.db.pf = pf;
+	progress.data.db.size.numRecords = records;
+
+	/* der AppInfo-Block ist freiwillig: fehlt er, meldet der Palm einen
+	 * Fehler, und die Datei bekommt keinen (wie bei pi_file_retrieve) */
+	result = dlp_ReadAppBlock(sd, db, 0, DLP_BUF_SIZE, buffer);
+	if (result > 0) {
+		pi_file_set_app_info(pf, buffer->data, (size_t)result);
+		progress.transferred_bytes += result;
+		report_progress(sd, &progress);
+	}
+
+	for (j = 0; j < records; j++) {
+		if (info->flags & dlpDBFlagResource) {
+			int resource_id;
+			unsigned long type;
+
+			if (dlp_ReadResourceByIndex(sd, db, j, buffer, &type, &resource_id) < 0)
+				goto fail;
+			if (pi_file_append_resource(pf, buffer->data, buffer->used, type, resource_id) < 0)
+				goto fail;
+		} else {
+			int attr, category;
+			recordid_t id;
+
+			if (dlp_ReadRecordByIndex(sd, db, j, buffer, &id, &attr, &category) < 0)
+				goto fail;
+			/* archiviert oder gelöscht: nicht wiederherstellbar, wie pi_file_retrieve */
+			if (!(attr & (dlpRecAttrArchived | dlpRecAttrDeleted))
+			    && pi_file_append_record(pf, buffer->data, buffer->used, attr, category, id) < 0)
+				goto fail;
+		}
+		progress.transferred_bytes += buffer->used;
+		progress.data.db.transferred_records++;
+		report_progress(sd, &progress);
+	}
+	pi_buffer_free(buffer);
+	if (dlp_CloseDB(sd, db) < 0)
+		return EXT_READ_FAILED;
+	return EXT_OK;
+
+fail:
+	pi_buffer_free(buffer);
+	dlp_CloseDB(sd, db);
+	return EXT_READ_FAILED;
+}
+
 /* "backup <Ordner>": die Datenbanken im RAM nach <Ordner> sichern, eine
  * .prc/.pdb je Datenbank. Seit der letzten Sicherung unverändert (das
  * Änderungsdatum auf dem Palm ist das Dateidatum, wie bei pilot-xfer -u):
@@ -387,7 +524,8 @@ static void emit_backup_failed(const char *name, const char *reason, int sd)
  * HotSync die vorige Sicherung einer Datenbank nicht zerstört.
  * Ereignisse: backupStarted (mit Gesamtzahl), je Datenbank backingUp und
  * backedUp / backupUnchanged / backupFailed, am Ende backupFinished; vorweg
- * backupSkipped für jede Datenbank, die der Palm schützt. */
+ * backupSkipped für jede Datenbank, die der Palm schützt, und für jede
+ * Schema-Datenbank eines Cobalt-Palms (Grund "schema": eigene Befehle). */
 static void backup(int sd, const char *dir)
 {
 	struct DBInfo *list = NULL;
@@ -421,6 +559,16 @@ static void backup(int sd, const char *dir)
 			emit_begin("backupSkipped");
 			emit_str("file", name, 0);
 			emit_str("reason", "protected", 0);
+			emit_end();
+			continue;
+		}
+		if (info.flags & dlpDBFlagSchema) {
+			char name[256];
+
+			file_name_for(name, sizeof(name), &info);
+			emit_begin("backupSkipped");
+			emit_str("file", name, 0);
+			emit_str("reason", "schema", 0);
 			emit_end();
 			continue;
 		}
@@ -491,7 +639,24 @@ static void backup(int sd, const char *dir)
 			failed++;
 			continue;
 		}
-		if (pi_file_retrieve(pf, sd, 0, install_progress) < 0) {
+		if (is_extended_db(&info)) {
+			enum extended_stage stage = retrieve_extended_db(pf, sd, &info, install_progress);
+
+			if (stage != EXT_OK) {
+				char reason[96];
+
+				snprintf(reason, sizeof(reason),
+					 stage == EXT_OPEN_FAILED
+					 ? "extended database: open failed (Palm OS error %d)"
+					 : "extended database: open succeeded, read failed (Palm OS error %d)",
+					 pi_palmos_error(sd));
+				emit_backup_failed(name, reason, sd);
+				pi_file_close(pf);
+				unlink(part);
+				failed++;
+				continue;
+			}
+		} else if (pi_file_retrieve(pf, sd, 0, install_progress) < 0) {
 			emit_backup_failed(name, "palmError", sd);
 			pi_file_close(pf);
 			unlink(part);

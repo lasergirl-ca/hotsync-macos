@@ -1000,8 +1000,11 @@ final class AppState {
             session.backupFailed += 1
             if let tabId = session.tabId { tabLog(tabId, L10n.logBackupFailed(file, palmOSError)) }
 
-        case .backupSkipped(let file, _):
-            if let tabId = session.tabId { tabLog(tabId, L10n.logBackupSkipped(file)) }
+        case .backupSkipped(let file, let reason):
+            // "schema": eine Schema-Datenbank eines Cobalt-Palms (eigene DLP-Befehle), sonst geschützt
+            if let tabId = session.tabId {
+                tabLog(tabId, reason == "schema" ? L10n.logBackupSkippedSchema(file) : L10n.logBackupSkipped(file))
+            }
 
         case .backupFinished(let saved, let unchanged, let failed):
             // vollständig nur, wenn jede Datenbank durch ist (nicht abgebrochen)

@@ -230,6 +230,9 @@ private func imageWithVersion(_ version: String?) -> Data {
             == .connected(PalmUser(name: "", userId: 0), romVersion: 0x0610_3021, dlpVersion: "2.1"))
     #expect(SessionEvent.parse(#"{"event":"backupSkipped","file":"CradleAuthDB.pdb","reason":"protected"}"#)
             == .backupSkipped(file: "CradleAuthDB.pdb", reason: "protected"))
+    // a Cobalt schema database (flag 0x1000) is skipped with its own reason
+    #expect(SessionEvent.parse(#"{"event":"backupSkipped","file":"PIMDB.pdb","reason":"schema"}"#)
+            == .backupSkipped(file: "PIMDB.pdb", reason: "schema"))
 }
 
 // MARK: - PalmAdmission
