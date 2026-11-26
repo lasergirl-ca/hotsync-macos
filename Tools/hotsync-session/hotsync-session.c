@@ -356,7 +356,12 @@ static int skip_in_backup(const struct DBInfo *info)
  * CradleSync-Aktualisierung. Anders als skip_in_backup wird das gemeldet. */
 static int protected_in_backup(const struct DBInfo *info)
 {
-	if ((info->flags & dlpDBFlagCopyPrevention) && !(info->flags & dlpDBFlagBackup))
+	/* Kopierschutz ohne Sicherungsbit allein reicht nicht: so sind auch
+	 * die Systembausteine eines T|X (WiFiLib, die Media-Plugins) und
+	 * gekaufte Musik markiert, und die gehören in die Sicherung. Nur ein
+	 * Schlüssel (Typ key_) bleibt deshalb auf dem Gerät. */
+	if ((info->flags & dlpDBFlagCopyPrevention) && !(info->flags & dlpDBFlagBackup)
+	    && info->type == FOURCC('k', 'e', 'y', '_'))
 		return 1;
 	if (info->creator == FOURCC('C', 'r', 'A', 'u') || info->creator == FOURCC('C', 'r', 'S', 'n'))
 		return 1;
