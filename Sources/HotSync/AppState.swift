@@ -851,9 +851,14 @@ final class AppState {
         case .timeout:
             session.timedOut = true
 
-        case .connected(let user, let romVersion, let dateFixStartYear, let lastSyncPC, let cradleSync):
+        case .connected(let user, let romVersion, let dateFixStartYear, let lastSyncPC, let cradleSync, let dlpVersion):
             session.connected = true
             session.romVersion = romVersion
+            // Palm OS Cobalt (6.x) spricht DLP 2.1: Kennung und Sicherung gehen
+            // wie gewohnt, der PIM-Abgleich kennt seine Schema-Datenbanken nicht
+            if let dlpVersion, dlpVersion.hasPrefix("2"), let tabId = session.tabId {
+                tabLog(tabId, L10n.logPalmDLP2(PalmOSVersion(rom: romVersion).description, dlpVersion))
+            }
             session.lastSyncPC = lastSyncPC   // syncInfo kommt erst danach, admit braucht ihn jetzt
             session.cradleSync = cradleSync
             // nur was DateFix selbst zulässt: 1904 … 1972 in Viererschritten

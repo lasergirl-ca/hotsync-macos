@@ -61,7 +61,9 @@ public enum SessionEvent: Equatable, Sendable {
     /// (also in `syncInfo`; here so that the app can decide at connect
     /// time). `cradleSync`: the CradleSync application is on the Palm, so a
     /// Cradle server syncs it too.
-    case connected(PalmUser, romVersion: UInt32, dateFixStartYear: Int? = nil, lastSyncPC: UInt32 = 0, cradleSync: Bool = false)
+    /// `dlpVersion`: the DLP the Palm speaks ("1.4", "2.1" for Cobalt), nil when the tool did not say.
+    case connected(PalmUser, romVersion: UInt32, dateFixStartYear: Int? = nil, lastSyncPC: UInt32 = 0, cradleSync: Bool = false,
+                   dlpVersion: String? = nil)
     case installing(file: String)
     case progress(bytes: Int)
     case installed(file: String, bytes: Int)
@@ -135,6 +137,8 @@ public enum SessionEvent: Equatable, Sendable {
         let user: String?
         let userId: UInt32?
         let romVersion: UInt32?
+        let dlpMajor: Int?
+        let dlpMinor: Int?
         let file: String?
         let bytes: Int?
         let reason: String?
@@ -190,7 +194,8 @@ public enum SessionEvent: Equatable, Sendable {
         case "connected":
             guard let name = l.user, let userId = l.userId else { return nil }
             return .connected(PalmUser(name: name, userId: userId), romVersion: l.romVersion ?? 0, dateFixStartYear: l.dateFixStartYear,
-                              lastSyncPC: l.lastSyncPC ?? 0, cradleSync: (l.cradleSync ?? 0) != 0)
+                              lastSyncPC: l.lastSyncPC ?? 0, cradleSync: (l.cradleSync ?? 0) != 0,
+                              dlpVersion: l.dlpMajor.map { "\($0).\(l.dlpMinor ?? 0)" })
         case "installing":
             guard let file = l.file else { return nil }
             return .installing(file: file)

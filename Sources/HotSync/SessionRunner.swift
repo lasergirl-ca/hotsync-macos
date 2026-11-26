@@ -33,7 +33,9 @@ final class SessionRunner {
     ///     Schnittstelle, "net:192.168.0.5"); sonst derselbe
     init(port: String, toolPort: String? = nil, baudRate: Int, timeout: Int) {
         self.port = port
-        process.arguments = ["--port", toolPort ?? port, "--timeout", String(timeout)]
+        // DLP 2.1 angekündigt: Palm OS Cobalt (6.x) verlangt mindestens 2,
+        // ein Palm OS bis 5 richtet sich nach seiner eigenen Version
+        process.arguments = ["--port", toolPort ?? port, "--timeout", String(timeout), "--dlp", "2.1"]
         var environment = ProcessInfo.processInfo.environment
         // pilot-link liest die serielle Baudrate aus PILOTRATE
         environment["PILOTRATE"] = String(baudRate)

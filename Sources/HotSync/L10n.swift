@@ -567,6 +567,10 @@ enum L10n {
     // MARK: - Sitzungs-Logs
 
     static func logTabListening(_ port: String) -> String { s("Lauscht an \(port)", "Listening on \(port)") }
+    static func logPalmDLP2(_ version: String, _ dlp: String) -> String { s(
+        "Palm OS \(version) spricht DLP \(dlp) (Cobalt): Kennung, Installation und Sicherung wie gewohnt; Kalender, Kontakte, Aufgaben und Memos liegen dort in Schema-Datenbanken, die dieser Abgleich noch nicht kennt",
+        "Palm OS \(version) speaks DLP \(dlp) (Cobalt): identity, install and backup as usual; Calendar, Contacts, Tasks and Memos live in schema databases there, which this sync does not know yet"
+    ) }
     static func logPalmConnected(_ name: String, _ userId: UInt32, _ files: Int) -> String { s(
         "Palm verbunden: \(identity(name, userId)) – \(files) Datei(en) zu installieren",
         "Palm connected: \(identity(name, userId)) – \(files) file(s) to install"

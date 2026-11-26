@@ -1715,6 +1715,9 @@ static int report_identity(int sd)
 	emit_str("user", user.username, 1);
 	emit_int("userId", (long)user.userID);
 	emit_int("romVersion", (long)sys.romVersion);
+	/* die DLP-Version des Palms: 1.x bis Palm OS 5, 2.1 bei Cobalt */
+	emit_int("dlpMajor", (long)sys.dlpMajorVersion);
+	emit_int("dlpMinor", (long)sys.dlpMinorVersion);
 	/* auch hier, nicht nur in syncInfo: die App entscheidet beim Verbinden,
 	 * was dieser HotSync tut, und braucht dafür den letzten PC */
 	emit_int("lastSyncPC", (long)user.lastSyncPC);
@@ -2339,13 +2342,24 @@ int main(int argc, char **argv)
 			port = argv[++i];
 		else if (strcmp(argv[i], "--timeout") == 0 && i + 1 < argc)
 			timeout = atoi(argv[++i]);
-		else {
-			fprintf(stderr, "usage: %s --port PORT [--timeout SECONDS]\n", argv[0]);
+		else if (strcmp(argv[i], "--dlp") == 0 && i + 1 < argc) {
+			/* Die DLP-Version, die wir dem Palm nennen (ReadSysInfo). Palm OS
+			 * Cobalt (6.x) bricht den HotSync ab, wenn der Desktop weniger
+			 * als 2 nennt; pilot-link nennt von sich aus 1.4. Ein Palm OS
+			 * bis 5 richtet sich nach der Version, die er selbst spricht. */
+			int major = 0, minor = 0;
+			if (sscanf(argv[++i], "%d.%d", &major, &minor) != 2 || major < 1) {
+				fprintf(stderr, "usage: %s --port PORT [--timeout SECONDS] [--dlp MAJOR.MINOR]\n", argv[0]);
+				return 1;
+			}
+			dlp_set_protocol_version(major, minor);
+		} else {
+			fprintf(stderr, "usage: %s --port PORT [--timeout SECONDS] [--dlp MAJOR.MINOR]\n", argv[0]);
 			return 1;
 		}
 	}
 	if (port == NULL) {
-		fprintf(stderr, "usage: %s --port PORT [--timeout SECONDS]\n", argv[0]);
+		fprintf(stderr, "usage: %s --port PORT [--timeout SECONDS] [--dlp MAJOR.MINOR]\n", argv[0]);
 		return 1;
 	}
 

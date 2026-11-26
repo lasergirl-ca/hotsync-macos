@@ -225,6 +225,9 @@ private func imageWithVersion(_ version: String?) -> Data {
             == .connected(PalmUser(name: "Z", userId: 1), romVersion: 0, dateFixStartYear: 1932))
     #expect(SessionEvent.parse(#"{"event":"connected","user":"Z","userId":1,"romVersion":0,"lastSyncPC":603880285,"cradleSync":1}"#)
             == .connected(PalmUser(name: "Z", userId: 1), romVersion: 0, lastSyncPC: 603_880_285, cradleSync: true))
+    // a Cobalt Palm (Palm OS 6.1) says it speaks DLP 2.1
+    #expect(SessionEvent.parse(#"{"event":"connected","user":"","userId":0,"romVersion":101724193,"dlpMajor":2,"dlpMinor":1}"#)
+            == .connected(PalmUser(name: "", userId: 0), romVersion: 0x0610_3021, dlpVersion: "2.1"))
     #expect(SessionEvent.parse(#"{"event":"backupSkipped","file":"CradleAuthDB.pdb","reason":"protected"}"#)
             == .backupSkipped(file: "CradleAuthDB.pdb", reason: "protected"))
 }
