@@ -1144,6 +1144,10 @@ enum L10n {
         "\(name) NICHT installiert (\(reason)) — bleibt für den nächsten HotSync in der Warteschlange",
         "\(name) NOT installed (\(reason)) — stays queued for the next HotSync"
     ) }
+    static func logPalmLeftBus(_ port: String) -> String { s(
+        "Palm an \(port) wieder weg, bevor ein HotSync anfing – es wird weiter gewartet",
+        "Palm on \(port) left again before a HotSync started – listening on"
+    ) }
     static func logSessionError(_ port: String, _ stage: String, _ message: String) -> String { s(
         "Fehler an \(port) (\(stage)): \(message)", "Error on \(port) (\(stage)): \(message)"
     ) }

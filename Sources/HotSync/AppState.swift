@@ -1157,6 +1157,16 @@ final class AppState {
             if let tabId = session.tabId { tabLog(tabId, L10n.logLocationsFailed(session.fixing ?? "", stage, message)) }
             if stage == "readall" { session.runner.send("closedb") } else { fixLocations(session) }
 
+        case .error(let stage, let message) where stage == "accept" && message.contains("(-200)")
+            && !session.connected && { if case .listener = session.purpose { return true } else { return false } }():
+            // Der Palm war am Bus und ist wieder weg, bevor ein HotSync anfing
+            // (ein Cobalt-Palm bleibt zwischen zwei HotSyncs angesteckt und
+            // trennt sich dann selbst): kein gescheiterter HotSync, der
+            // Listener kommt gleich wieder
+            session.timedOut = true
+            DebugLog.shared.log(L10n.logPalmLeftBus(portLabel(port)), source: "Session")
+            for tab in autoTabs(on: port) { tabLog(tab.id, L10n.logPalmLeftBus(portLabel(port))) }
+
         case .error(let stage, let message):
             session.errorMessage = "\(stage): \(message)"
             DebugLog.shared.log(L10n.logSessionError(portLabel(port), stage, message), source: "Session")
