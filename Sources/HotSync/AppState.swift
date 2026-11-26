@@ -709,6 +709,8 @@ final class AppState {
         var lastSyncPC: UInt32 = 0
         /// CradleSync ist auf dem Palm: ein Cradle-Server gleicht ihn auch ab
         var cradleSync = false
+        /// Die DLP-Version des Palms ("2.1": Cobalt), wenn das Werkzeug sie nannte
+        var dlpVersion: String?
         /// DateFix auf dem Palm: um so viele Jahre sind seine Daten und
         /// seine Uhr verschoben (0: kein DateFix)
         var dateFixYears = 0
@@ -854,6 +856,7 @@ final class AppState {
         case .connected(let user, let romVersion, let dateFixStartYear, let lastSyncPC, let cradleSync, let dlpVersion):
             session.connected = true
             session.romVersion = romVersion
+            session.dlpVersion = dlpVersion
             // Palm OS Cobalt (6.x) spricht DLP 2.1: Kennung und Sicherung gehen
             // wie gewohnt, der PIM-Abgleich kennt seine Schema-Datenbanken nicht
             if let dlpVersion, dlpVersion.hasPrefix("2"), let tabId = session.tabId {
@@ -1489,7 +1492,13 @@ final class AppState {
             // Uhr vom Mac jetzt, Zeitzonen nach der Sicherung
             if session.dateFixYears > 0 { tabLog(tabId, L10n.logDateFix(1904 + session.dateFixYears)) }
             if profile.isClockSyncOn {
-                if dry {
+                if session.dlpVersion?.hasPrefix("2") == true {
+                    // Cobalt nimmt die gesetzte Zeit als UTC und zeigt sie in
+                    // seiner Zone an (ab Werk USA Pacific): die Ortszeit des
+                    // Macs stellte die Uhr acht Stunden zurück, auf einem T|X
+                    // mit beiden Systemen auch die von Garnet
+                    tabLog(tabId, L10n.logClockSkippedCobalt)
+                } else if dry {
                     tabLog(tabId, L10n.logDryRunClock)
                 } else if session.dateFixYears > 0 {
                     session.runner.send("settime \(session.dateFixYears)")   // Wanduhrzeit, Jahr zurück

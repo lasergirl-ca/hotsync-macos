@@ -775,6 +775,10 @@ enum L10n {
     static var conflictAskSkip: String { s("Auslassen", "Skip") }
     static var conflictAskApply: String { s("Anwenden", "Apply") }
     static var logDryRun: String { s("Probelauf: die Abgleiche schreiben nichts", "Dry run: the syncs write nothing") }
+    static var logClockSkippedCobalt: String { s(
+        "Uhr nicht gestellt: ein Palm mit DLP 2 (Cobalt) nimmt die Zeit als UTC und zeigt sie in seiner eigenen Zone an",
+        "Clock not set: a Palm speaking DLP 2 (Cobalt) takes the time as UTC and shows it in its own zone"
+    ) }
     static var logDryRunClock: String { s("Probelauf: die Uhr des Palms würde gestellt werden", "Dry run: the Palm's clock would be set") }
     static func logDryRunWouldInstall(_ name: String, _ records: Int, _ bytes: Int) -> String { s(
         "Probelauf: \(name) würde installiert werden (\(records) Einträge, \(bytes) Bytes), liegt unter Sync/DryRun",
