@@ -362,9 +362,9 @@ def free_port():
     return port
 
 
-def start_tool(tool, palm_port):
+def start_tool(tool, palm_port, extra_args=()):
     """The tool listening on net:, with a reader for its events."""
-    proc = subprocess.Popen([tool, "--port", f"net:any:{palm_port}", "--timeout", "15"],
+    proc = subprocess.Popen([tool, "--port", f"net:any:{palm_port}", "--timeout", "15", *extra_args],
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     events = []
 
