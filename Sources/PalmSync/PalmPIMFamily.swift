@@ -12,9 +12,24 @@ import HotSyncCore
 /// record, what goes onto the Palm becomes a classic one, and the Mac's
 /// items are limited to what a classic record can hold before they are
 /// compared, so a round trip through the Palm changes nothing.
+///
+/// Palm OS Cobalt (6.x) keeps the same four applications' data in schema
+/// databases (AddressDBS, DateBookDBS, ToDoDBS, MemoDBS): tables of typed
+/// columns reached through Cobalt-only DLP commands, not byte records. The
+/// rows become Garnet records at the edge too (`CobaltRecords`), so once
+/// read, a Cobalt Palm looks like a Garnet one to the engine; the byte
+/// functions below treat it as Garnet. Writing rows is not implemented yet.
 public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
     case garnet
     case classic
+    case cobalt
+
+    /// Schema databases (Cobalt): read with the `cobalt...` commands and
+    /// `CobaltDatabaseReader`, not `opendb`/`readall`.
+    public var isSchema: Bool { self == .cobalt }
+
+    /// The families whose databases are known by name.
+    public static let all: [PalmPIMFamily] = [.garnet, .classic, .cobalt]
 
     public enum Kind: String, Codable, Sendable, CaseIterable {
         case calendar, contacts, tasks, memos
@@ -32,6 +47,10 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
         case (.classic, .contacts): return ClassicAddress.databaseName
         case (.classic, .tasks): return ClassicToDo.databaseName
         case (.classic, .memos): return ClassicMemo.databaseName
+        case (.cobalt, .calendar): return "DateBookDBS"
+        case (.cobalt, .contacts): return "AddressDBS"
+        case (.cobalt, .tasks): return "ToDoDBS"
+        case (.cobalt, .memos): return "MemoDBS"
         }
     }
 
@@ -45,12 +64,16 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
         case (.classic, .contacts): return ClassicAddress.creator
         case (.classic, .tasks): return ClassicToDo.creator
         case (.classic, .memos): return ClassicMemo.creator
+        case (.cobalt, .calendar): return "dats"
+        case (.cobalt, .contacts): return "adrs"
+        case (.cobalt, .tasks): return "tdos"
+        case (.cobalt, .memos): return "mems"
         }
     }
 
-    /// The kind of a database of either family, by name.
+    /// The kind of a database of any family, by name.
     public static func kind(ofDatabase name: String) -> Kind? {
-        for family in [PalmPIMFamily.garnet, .classic] {
+        for family in all {
             for kind in Kind.allCases where family.databaseName(kind) == name { return kind }
         }
         return nil
@@ -58,7 +81,7 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
 
     /// The family a database name belongs to.
     public static func family(ofDatabase name: String) -> PalmPIMFamily? {
-        for family in [PalmPIMFamily.garnet, .classic] {
+        for family in all {
             for kind in Kind.allCases where family.databaseName(kind) == name { return family }
         }
         return nil
@@ -66,9 +89,14 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
 
     // MARK: Records at the edge
 
-    /// Bytes of text one memo holds: 4 KB on Memo Pad, 32 KB on Memos.
+    /// Bytes of text one memo holds: 4 KB on Memo Pad, 32 KB on Memos, a
+    /// 65534-byte VarChar less its NUL on Cobalt.
     public var memoTextLimit: Int {
-        self == .classic ? ClassicMemo.textLimit : 32767
+        switch self {
+        case .classic: return ClassicMemo.textLimit
+        case .garnet: return 32767
+        case .cobalt: return 65533
+        }
     }
 
     /// The Garnet record for a record read from the Palm.
@@ -255,12 +283,14 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
         }
     }
 
-    /// The categories of a database's AppInfo block, of either family.
+    /// The categories of a database's AppInfo block, of any family. A
+    /// Cobalt database has none: `CobaltDatabaseRead.appInfo` is the Garnet
+    /// block built from its categories.
     public func categories(ofAppInfo data: Data, kind: Kind) -> CategoryAppInfo? {
         switch (self, kind) {
-        case (.garnet, .calendar): return (try? CalendarAppInfo(data: data))?.categories
-        case (.garnet, .contacts): return (try? ContactAppInfo(data: data))?.categories
-        case (.garnet, .tasks): return (try? TaskAppInfo(data: data))?.categories
+        case (.garnet, .calendar), (.cobalt, .calendar): return (try? CalendarAppInfo(data: data))?.categories
+        case (.garnet, .contacts), (.cobalt, .contacts): return (try? ContactAppInfo(data: data))?.categories
+        case (.garnet, .tasks), (.cobalt, .tasks): return (try? TaskAppInfo(data: data))?.categories
         case (.classic, .calendar): return (try? ClassicDatebookAppInfo(data: data))?.categories
         case (.classic, .contacts): return (try? ClassicAddressAppInfo(data: data))?.categories
         case (.classic, .tasks): return (try? ClassicToDoAppInfo(data: data))?.categories
@@ -272,9 +302,9 @@ public enum PalmPIMFamily: String, Codable, Sendable, Equatable {
     /// the family's codec (the check after a one-way install).
     public func readsBack(_ data: Data, kind: Kind) -> Bool {
         switch (self, kind) {
-        case (.garnet, .calendar): return (try? CalendarEvent(data: data))?.encode() == data
-        case (.garnet, .contacts): return (try? Contact(data: data))?.encode() == data
-        case (.garnet, .tasks): return (try? PalmTask(data: data))?.encode() == data
+        case (.garnet, .calendar), (.cobalt, .calendar): return (try? CalendarEvent(data: data))?.encode() == data
+        case (.garnet, .contacts), (.cobalt, .contacts): return (try? Contact(data: data))?.encode() == data
+        case (.garnet, .tasks), (.cobalt, .tasks): return (try? PalmTask(data: data))?.encode() == data
         case (.classic, .calendar): return (try? ClassicDatebook.calendarEvent(from: data))?.encode() == data
         case (.classic, .contacts): return (try? ClassicAddress(data: data))?.encode() == data
         case (.classic, .tasks): return (try? ClassicToDo(data: data))?.encode() == data
