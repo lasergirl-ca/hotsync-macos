@@ -868,9 +868,9 @@ struct TimeSyncSection: View {
                 Text(L10n.clockSyncHint)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                // Zeitzonen-Datenbanken (locL*) gibt es erst ab Palm OS 5.2;
-                // davor liegen die Zonen in den Systemeinstellungen
-                if appState.deviceManager.profile(profileId)?.palmOS?.hasGarnetPIM != false {
+                // Zeitzonen-Datenbanken (locL*) gibt es erst ab Palm OS 5.2 und
+                // nicht auf Cobalt; sonst liegen die Zonen in den Systemeinstellungen
+                if appState.deviceManager.profile(profileId)?.hasZoneDatabases != false {
                     Toggle(isOn: Binding(
                         get: { appState.deviceManager.profile(profileId)?.isZoneSyncOn ?? false },
                         set: { appState.setZoneSync($0, for: profileId) }

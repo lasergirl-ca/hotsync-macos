@@ -1,5 +1,6 @@
 import Foundation
 import HotSyncCore
+import PalmSync
 import PalmSyncMac
 
 struct DeviceProfile: Codable, Identifiable, Equatable {
@@ -13,6 +14,9 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     var lastBackupAt: Date?
     /// Palm-OS-Version, wie der Palm sie beim letzten HotSync meldete
     var romVersion: UInt32?
+    /// DLP-Version, wie der Palm sie beim letzten HotSync meldete ("1.4";
+    /// "2.1" heißt Cobalt, dessen PIM-Daten in Schema-Datenbanken liegen)
+    var dlpVersion: String?
     /// Kalender-Abgleich Mac → Palm: welche Kalender, wie weit; nil = nie eingerichtet
     var calendarSync: CalendarSyncSettings?
     /// Kontakte-Abgleich Mac → Palm: welche Konten; nil = nie eingerichtet
@@ -74,6 +78,18 @@ struct DeviceProfile: Codable, Identifiable, Equatable {
     var isNetSyncOn: Bool { netSync ?? false }
 
     var palmOS: PalmOSVersion? { romVersion.map(PalmOSVersion.init(rom:)) }
+
+    /// Die PIM-Programme des Palms, soweit bekannt: Cobalt, wenn er DLP 2.x
+    /// sprach (die ROM-Version allein sagt das nicht), sonst nach Palm OS
+    var pimFamily: PalmPIMFamily? {
+        if dlpVersion?.hasPrefix("2") == true { return .cobalt }
+        return palmOS?.pimFamily
+    }
+
+    /// Ob der Tab den Zeitzonen-Schalter zeigt: die locL*-Datenbanken gibt
+    /// es nur bei den Garnet-PIMs (ab Palm OS 5.2, nicht auf Cobalt); ein
+    /// Palm, der noch nie da war, gilt als Garnet
+    var hasZoneDatabases: Bool { pimFamily ?? .garnet == .garnet }
 
     /// false, solange noch kein Palm diesem Profil zugeordnet ist (User-ID 0):
     /// Dann übernimmt der erste Palm ohne Benutzer, der in einem Tab dieses

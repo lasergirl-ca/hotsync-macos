@@ -116,6 +116,14 @@ final class DeviceManager {
         saveProfiles()
     }
 
+    /// Die DLP-Version des Palms, nur Änderungen werden gespeichert
+    func updateDlpVersion(_ dlpVersion: String?, for profileId: UUID) {
+        guard let dlpVersion, let index = profiles.firstIndex(where: { $0.id == profileId }),
+              profiles[index].dlpVersion != dlpVersion else { return }
+        profiles[index].dlpVersion = dlpVersion
+        saveProfiles()
+    }
+
     /// Ob CradleSync beim letzten Verbinden auf dem Palm war; nur Änderungen
     /// werden gespeichert.
     func updateCradleSyncSeen(_ seen: Bool, for profileId: UUID) {
