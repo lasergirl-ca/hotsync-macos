@@ -2406,6 +2406,61 @@ static void write_net_sync(int sd, const char *args)
 
 /* Wartet, bis eine Anweisung lesbar ist, und hält den Palm solange mit
  * Lebenszeichen wach. 0, wenn der Palm nicht mehr antwortet. */
+/* Rohe DLP-Anfrage für die Cobalt-Erweiterungen (Befehlswörter ab 0x70),
+ * die pilot-link nicht kennt: "rawdlp HEX [N]" schickt die Bytes so, wie sie
+ * stehen, und gibt N Antwortnachrichten (Vorgabe 1) als Hex zurück; N = 0
+ * liest, bis eine Nachricht nur noch aus dem Kopf besteht (so endet der
+ * Zeilenstrom 0xAE). Nur zum Erkunden; die App benutzt es nicht. */
+static void raw_dlp(int sd, const char *args)
+{
+	static uint8_t req[4096];
+	const char *sp = strchr(args, ' ');
+	size_t n = sp ? (size_t)(sp - args) : strlen(args);
+	int count = sp ? atoi(sp + 1) : 1, i, limit;
+	pi_buffer_t *buf;
+
+	if (n == 0 || n % 2 || n / 2 > sizeof(req) || count < 0 || count > 64) {
+		emit_error("rawdlp", "bad request");
+		return;
+	}
+	if (sp) {
+		char hex[2 * sizeof(req) + 1];
+		memcpy(hex, args, n);
+		hex[n] = '\0';
+		if (!hex_decode(hex, req, n / 2)) {
+			emit_error("rawdlp", "bad hex");
+			return;
+		}
+	} else if (!hex_decode(args, req, n / 2)) {
+		emit_error("rawdlp", "bad hex");
+		return;
+	}
+	pi_flush(sd, PI_FLUSH_INPUT);
+	if (pi_write(sd, req, n / 2) < (ssize_t)(n / 2)) {
+		emit_error("rawdlp", "write failed (%d)", pi_error(sd));
+		return;
+	}
+	buf = pi_buffer_new(65536);
+	limit = count ? count : 64;
+	for (i = 0; i < limit; i++) {
+		ssize_t got;
+
+		pi_buffer_clear(buf);
+		got = pi_read(sd, buf, buf->allocated);
+		if (got < 0) {
+			emit_error("rawdlp", "read failed (%ld)", (long)got);
+			break;
+		}
+		emit_begin("rawdlp");
+		emit_int("part", i);
+		emit_hex("reply", buf->data, buf->used);
+		emit_end();
+		if (count == 0 && buf->used <= 6)
+			break;
+	}
+	pi_buffer_free(buf);
+}
+
 static int wait_for_command(int sd)
 {
 	struct pollfd in = { .fd = STDIN_FILENO, .events = POLLIN };
@@ -2493,6 +2548,8 @@ static void run_commands(int sd)
 		} else if (strncmp(line, "relay ", 6) == 0) {
 			if (relay_session(sd, line + 6))
 				break;	/* the server has ended the session */
+		} else if (strncmp(line, "rawdlp ", 7) == 0) {
+			raw_dlp(sd, line + 7);
 		} else if (strcmp(line, "end") == 0) {
 			break;
 		} else if (line[0] != '\0') {
