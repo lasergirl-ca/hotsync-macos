@@ -2289,6 +2289,23 @@ static void delete_record(int sd, const char *args)
 	emit_end();
 }
 
+/* Löscht eine Datenbank auf dem Palm (Karte 0). Für Aufräumarbeiten, etwa
+ * eine Garnet-PIM-Datenbank, die versehentlich auf einen Cobalt kam. */
+static void delete_database(int sd, const char *name)
+{
+	if (*name == '\0') {
+		emit_error("deletedb", "usage: deletedb <name>");
+		return;
+	}
+	if (dlp_DeleteDB(sd, 0, name) < 0) {
+		emit_dlp_error(sd, "deletedb", "cannot delete the database");
+		return;
+	}
+	emit_begin("databaseDeleted");
+	emit_str("name", name, 1);
+	emit_end();
+}
+
 static void reset_flags(int sd)
 {
 	if (!require_open_db("resetflags"))
@@ -3561,6 +3578,8 @@ static void run_commands(int sd)
 			write_record(sd, line + 9);
 		} else if (strncmp(line, "deleterec ", 10) == 0) {
 			delete_record(sd, line + 10);
+		} else if (strncmp(line, "deletedb ", 9) == 0) {
+			delete_database(sd, line + 9);
 		} else if (strcmp(line, "resetflags") == 0) {
 			reset_flags(sd);
 		} else if (strcmp(line, "cleanup") == 0) {
