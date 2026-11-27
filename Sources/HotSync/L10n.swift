@@ -568,8 +568,24 @@ enum L10n {
 
     static func logTabListening(_ port: String) -> String { s("Lauscht an \(port)", "Listening on \(port)") }
     static func logPalmDLP2(_ version: String, _ dlp: String) -> String { s(
-        "Palm OS \(version) spricht DLP \(dlp) (Cobalt): Kennung, Installation und Sicherung wie gewohnt; Kalender, Kontakte, Aufgaben und Memos liegen dort in Schema-Datenbanken, die dieser Abgleich noch nicht kennt",
-        "Palm OS \(version) speaks DLP \(dlp) (Cobalt): identity, install and backup as usual; Calendar, Contacts, Tasks and Memos live in schema databases there, which this sync does not know yet"
+        "Palm OS \(version) spricht DLP \(dlp) (Cobalt): Kennung, Installation und Sicherung wie gewohnt; Kalender, Kontakte, Aufgaben und Memos liegen dort in Schema-Datenbanken, die der Abgleich in beide Richtungen liest, aber noch nicht schreibt",
+        "Palm OS \(version) speaks DLP \(dlp) (Cobalt): identity, install and backup as usual; Calendar, Contacts, Tasks and Memos live in schema databases there, which the two-way sync reads but does not write yet"
+    ) }
+    static func logPalmCobaltPIM(_ version: String) -> String { s(
+        "Palm OS \(version) (Cobalt): Kalender, Kontakte, Aufgaben und Memos werden gelesen und der Plan gezeigt – geschrieben wird noch nichts, weder auf den Palm noch auf den Mac",
+        "Palm OS \(version) (Cobalt): Calendar, Contacts, Tasks and Memos are read and the plan shown – nothing is written yet, neither to the Palm nor to the Mac"
+    ) }
+    static func logCobaltOneWayUnsupported(_ what: String) -> String { s(
+        "\(what): auf einen Cobalt-Palm wird noch nichts installiert; nur der Abgleich in beide Richtungen liest ihn",
+        "\(what): nothing is installed on a Cobalt Palm yet; only the two-way sync reads it"
+    ) }
+    static func logCobaltRead(_ what: String, rows: Int, skipped: Int, warnings: Int) -> String { s(
+        "\(what): \(rows) Zeilen vom Palm gelesen, \(skipped) ohne Datensatz, \(warnings) Hinweise",
+        "\(what): \(rows) rows read from the Palm, \(skipped) without a record, \(warnings) notes"
+    ) }
+    static var logTwoWayCobaltReadOnly: String { s(
+        "Cobalt: nur gelesen – nichts geschrieben, weder auf dem Palm noch auf dem Mac, kein Spiegel gespeichert",
+        "Cobalt: read only – nothing written on the Palm or the Mac, no mirror saved"
     ) }
     static func logPalmConnected(_ name: String, _ userId: UInt32, _ files: Int) -> String { s(
         "Palm verbunden: \(identity(name, userId)) – \(files) Datei(en) zu installieren",

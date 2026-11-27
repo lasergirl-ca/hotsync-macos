@@ -727,6 +727,9 @@ final class AppState {
         /// wie viele Datensätze der Palm beim Öffnen gemeldet hat: weniger
         /// gelesen heißt abgebrochen, nicht gelöscht
         var twoWayExpected = -1
+        /// Cobalt: die Schema-Datenbank des laufenden Abgleichs wird über
+        /// die cobalt*-Befehle gelesen (nur gelesen, siehe CobaltDatabaseReader)
+        var cobaltReader: CobaltDatabaseReader?
         var restoreFiles: [URL] = []
         var restoreDone = 0
         var restoreFailed = 0
@@ -933,6 +936,12 @@ final class AppState {
             && ["opendb", "readappinfo", "readall", "closedb"].contains(stage):
             if let tabId = session.tabId { tabLog(tabId, L10n.logTwoWayFailed("\(stage): \(message)")) }
             if stage == "readall" || stage == "readappinfo" { session.runner.send("closedb") } else { twoWayNext(session) }
+        // Cobalt: die Antworten der cobalt*-Befehle gehören dem Leser
+        case .cobalt where session.stage == .twoWayCalendar && session.cobaltReader != nil:
+            cobaltTwoWay(session, event)
+        case .error(let stage, _) where session.stage == .twoWayCalendar && session.cobaltReader != nil
+            && CobaltDatabaseReader.stages.contains(stage):
+            cobaltTwoWay(session, event)
 
         // Zeitzonen: die korrigierte Ortsdatenbank wird installiert - vor den
         // allgemeinen Fällen, sonst zählt sie als Datei der Warteschlange
@@ -1469,10 +1478,17 @@ final class AppState {
             // Datebook/Address/To Do (vor Palm OS 5.2): dieselben Abgleiche
             // über die klassischen Datenbanken, siehe PalmPIMFamily; nur
             // die Zeitzonen (locL*) gibt es dort nicht
-            let family = palmOS.pimFamily
-            if family == .classic, profile.calendarSync?.enabled == true || profile.contactSync?.enabled == true
-                || profile.taskSync?.enabled == true || profile.memoSync?.enabled == true {
+            let family = pimFamily(session)
+            let anyPIM = profile.calendarSync?.enabled == true || profile.contactSync?.enabled == true
+                || profile.taskSync?.enabled == true || profile.memoSync?.enabled == true
+            if family == .classic, anyPIM {
                 tabLog(tabId, L10n.logPalmOSClassic(palmOS.description))
+            }
+            // Cobalt: die vier Datenbanken werden gelesen und der Plan gezeigt,
+            // geschrieben wird noch nichts (weder Palm noch Mac), und eine
+            // Garnet-Datenbank zu installieren hieße dort nichts
+            if family == .cobalt, anyPIM {
+                tabLog(tabId, L10n.logPalmCobaltPIM(palmOS.description))
             }
             // CradleSync auf dem Palm: ein Cradle-Server gleicht Kalender,
             // Kontakte und Aufgaben auch ab. Hat zuletzt er abgeglichen,
@@ -1536,6 +1552,8 @@ final class AppState {
                     // einseitig heißt ersetzen: ohne gewählten Kalender wäre
                     // der Palm danach leer
                     tabLog(tabId, L10n.logNothingChosen(L10n.twoWayCalendar, family.databaseName(.calendar)))
+                } else if family == .cobalt {
+                    tabLog(tabId, L10n.logCobaltOneWayUnsupported(L10n.twoWayCalendar))
                 } else {
                     queueCalendar(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears,
                                   family: family)
@@ -1550,6 +1568,8 @@ final class AppState {
                     tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayContacts))
                 } else if settings.containers.isEmpty {
                     tabLog(tabId, L10n.logNothingChosen(L10n.twoWayContacts, family.databaseName(.contacts)))
+                } else if family == .cobalt {
+                    tabLog(tabId, L10n.logCobaltOneWayUnsupported(L10n.twoWayContacts))
                 } else {
                     queueContacts(settings, profileId: profileId, tabId: tabId, queue: queue, dryRun: dry, dateFixYears: session.dateFixYears,
                                   family: family)
@@ -1564,6 +1584,8 @@ final class AppState {
                     tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayTasks))
                 } else if settings.lists.isEmpty {
                     tabLog(tabId, L10n.logNothingChosen(L10n.twoWayTasks, family.databaseName(.tasks)))
+                } else if family == .cobalt {
+                    tabLog(tabId, L10n.logCobaltOneWayUnsupported(L10n.twoWayTasks))
                 } else {
                     if !dry { session.checkDatabases.append(family.databaseName(.tasks)) }
                     // Reminders liefert asynchron; der Palm wartet solange (Lebenszeichen)
@@ -1582,6 +1604,8 @@ final class AppState {
                     tabLog(tabId, L10n.logTwoWayPending(L10n.twoWayMemos))
                 } else if settings.folders.isEmpty {
                     tabLog(tabId, L10n.logNothingChosen(L10n.twoWayMemos, family.databaseName(.memos)))
+                } else if family == .cobalt {
+                    tabLog(tabId, L10n.logCobaltOneWayUnsupported(L10n.twoWayMemos))
                 } else {
                     if !dry { session.checkDatabases.append(family.databaseName(.memos)) }
                     // Notes antwortet über osascript, abseits des Hauptthreads
@@ -1871,10 +1895,60 @@ final class AppState {
         session.twoWayAfterInstall = nil
         session.twoWaySyncInfoOnly = false
         session.twoWayExpected = -1
+        session.cobaltReader = nil
         session.stage = .twoWayCalendar
         statuses[tabId]?.phase = .readingCalendar(user: user, database: name, done: 0)
         tabLog(tabId, L10n.logTwoWayReading(twoWayName(name)))
-        session.runner.send("opendb r \(name)")
+        if pimFamily(session) == .cobalt, let kind = PalmPIMFamily.kind(ofDatabase: name) {
+            // Schema-Datenbank: öffnen, Schema prüfen, Kategorien, Zeilen, schließen -
+            // dann erst planen (gelesen wird alles, geschrieben nichts)
+            let reader = CobaltDatabaseReader(kind: kind)
+            session.cobaltReader = reader
+            session.runner.send(reader.openCommand)
+        } else {
+            session.runner.send("opendb r \(name)")
+        }
+    }
+
+    /// Ein Ereignis für den Cobalt-Leser des laufenden Abgleichs: der sagt,
+    /// was als Nächstes zu senden ist; ist er fertig, wird mit seinen Zeilen
+    /// als Garnet-Datensätzen geplant (die Datenbank ist dann schon zu).
+    private func cobaltTwoWay(_ session: Session, _ event: SessionEvent) {
+        guard var reader = session.cobaltReader, let tabId = session.tabId else { return }
+        let action = reader.handle(event)
+        session.cobaltReader = reader
+        switch action {
+        case .wait:
+            break
+        case .send(let command):
+            session.runner.send(command)
+        case .finished:
+            let what = twoWayName(session.twoWayCurrent ?? "")
+            if let failure = reader.failure { tabLog(tabId, L10n.logTwoWayFailed(failure)) }
+            for mismatch in reader.mismatches.prefix(10) { tabLog(tabId, "  " + mismatch.description) }
+            guard let read = reader.result else {
+                session.cobaltReader = nil
+                twoWayNext(session)
+                return
+            }
+            tabLog(tabId, L10n.logCobaltRead(what, rows: read.rows.count, skipped: read.skipped.count, warnings: read.warnings.count))
+            for warning in read.warnings.prefix(10) { tabLog(tabId, "  " + warning) }
+            session.calendarAppInfo = read.appInfo
+            session.calendarRecords = read.records
+            twoWayPlanned(session)   // ruft am Ende twoWayClose
+        }
+    }
+
+    /// Die Datenbank des laufenden Abgleichs ist fertig: ein Cobalt-Palm hat
+    /// seine schon geschlossen, also gleich die nächste; sonst closedb, und
+    /// dbClosed geht weiter.
+    private func twoWayClose(_ session: Session) {
+        if session.cobaltReader != nil {
+            session.cobaltReader = nil
+            twoWayNext(session)
+        } else {
+            session.runner.send("closedb")
+        }
     }
 
     private func twoWayName(_ database: String) -> String {
@@ -1889,7 +1963,10 @@ final class AppState {
     /// Die PIM-Programme des Palms: Garnet (ab Palm OS 5.2) oder die
     /// klassischen Datebook, Address und To Do.
     private func pimFamily(_ session: Session) -> PalmPIMFamily {
-        PalmOSVersion(rom: session.romVersion).pimFamily
+        // ein Palm, der DLP 2.1 spricht, ist ein Cobalt (6.x): seine PIM-Daten
+        // liegen in Schema-Datenbanken, die Versionsnummer allein sagt das nicht
+        if session.dlpVersion?.hasPrefix("2") == true { return .cobalt }
+        return PalmOSVersion(rom: session.romVersion).pimFamily
     }
 
     /// Die PC-ID eines Profils: einmal festgelegt und gespeichert. Ein Profil
@@ -1919,7 +1996,7 @@ final class AppState {
     /// Die Datenbank ist gelesen: Mac-Seite holen, planen, berichten, anwenden.
     private func twoWayPlanned(_ session: Session) {
         guard let profileId = session.profileId, let profile = deviceManager.profile(profileId) else {
-            session.runner.send("closedb")
+            self.twoWayClose(session)
             return
         }
         switch session.twoWayCurrent.flatMap(PalmPIMFamily.kind(ofDatabase:)) {
@@ -2014,6 +2091,12 @@ final class AppState {
         }
         report(firstPlan, policy: engine.conflictPolicy)
 
+        // Cobalt: Zeilen schreiben kann die App noch nicht, und ohne den Palm
+        // bleibt auch der Mac, wie er war (sonst zwei Stände ohne Spiegel)
+        if pimFamily(session) == .cobalt {
+            tabLog(tabId, L10n.logTwoWayCobaltReadOnly)
+            return
+        }
         guard !profile.isDryRun else {
             tabLog(tabId, L10n.logTwoWayDryRunDone)
             return
@@ -2124,12 +2207,12 @@ final class AppState {
 
     private func twoWayCalendar(_ session: Session, profile: DeviceProfile) {
         guard let tabId = session.tabId, let settings = profile.calendarSync else {
-            session.runner.send("closedb")
+            self.twoWayClose(session)
             return
         }
         guard calendarSource.hasAccess else {
             tabLog(tabId, L10n.logCalendarNoAccess)
-            session.runner.send("closedb")
+            self.twoWayClose(session)
             return
         }
         let family = pimFamily(session)
@@ -2143,7 +2226,7 @@ final class AppState {
         let events: [MacEvent]
         do { events = try calendarSource.events(from: windowStart, to: windowEnd, calendarIDs: settings.calendars.map(\.id)) } catch {
             tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
-            session.runner.send("closedb")
+            self.twoWayClose(session)
             return
         }
         let builder = CalendarBuilder(options: .init(homeZone: .current, windowStart: windowStart, windowEnd: windowEnd,
@@ -2174,23 +2257,23 @@ final class AppState {
                       let appInfo = family.classicAppInfo(kind: .calendar, existing: existingAppInfo, categories: categories, startOfWeek: startOfWeek)
                       return (family.deviceDatabase(db, kind: .calendar, appInfo: appInfo), ids)
                   },
-                  completion: { session.runner.send("closedb") })
+                  completion: { self.twoWayClose(session) })
     }
 
     private func twoWayContacts(_ session: Session, profile: DeviceProfile) {
         guard let tabId = session.tabId, let settings = profile.contactSync else {
-            session.runner.send("closedb")
+            self.twoWayClose(session)
             return
         }
         guard contactSource.hasAccess else {
             tabLog(tabId, L10n.logContactsNoAccess)
-            session.runner.send("closedb")
+            self.twoWayClose(session)
             return
         }
         let family = pimFamily(session)
         guard let appInfoData = session.calendarAppInfo, let categories = family.categories(ofAppInfo: appInfoData, kind: .contacts) else {
             tabLog(tabId, L10n.logTwoWayFailed("\(family.databaseName(.contacts)): AppInfo"))
-            session.runner.send("closedb")
+            self.twoWayClose(session)
             return
         }
         // der Palm-eigene AppInfo (Beschriftungen, Land, Sortierung) bleibt;
@@ -2202,7 +2285,7 @@ final class AppState {
         let macContacts: [MacContact]
         do { macContacts = try contactSource.contacts(in: containers) } catch {
             tabLog(tabId, L10n.logContactsFailed(error.localizedDescription))
-            session.runner.send("closedb")
+            self.twoWayClose(session)
             return
         }
         let builder = ContactsBuilder(options: .init(containers: settings.containers.map { .init(id: $0.id, title: $0.title) }))
@@ -2226,24 +2309,24 @@ final class AppState {
                       let appInfo = family.classicAppInfo(kind: .contacts, existing: appInfoData, categories: categories)
                       return (family.deviceDatabase(db, kind: .contacts, appInfo: appInfo), ids)
                   },
-                  completion: { session.runner.send("closedb") })
+                  completion: { self.twoWayClose(session) })
     }
 
     private func twoWayTasks(_ session: Session, profile: DeviceProfile) {
         // die Aufgaben schließen die Datenbank selbst (asynchron), auch bei jedem frühen Ende
         guard let tabId = session.tabId, let settings = profile.taskSync else {
-            session.runner.send("closedb")
+            self.twoWayClose(session)
             return
         }
         guard reminderSource.hasAccess else {
             tabLog(tabId, L10n.logTasksNoAccess)
-            session.runner.send("closedb")
+            self.twoWayClose(session)
             return
         }
         let family = pimFamily(session)
         guard let appInfoData = session.calendarAppInfo, let categories = family.categories(ofAppInfo: appInfoData, kind: .tasks) else {
             tabLog(tabId, L10n.logTwoWayFailed("\(family.databaseName(.tasks)): AppInfo"))
-            session.runner.send("closedb")
+            self.twoWayClose(session)
             return
         }
         let garnetAppInfo = (try? TaskAppInfo(data: appInfoData)) ?? TaskAppInfo(categories: categories)
@@ -2257,7 +2340,7 @@ final class AppState {
             let reminders: [MacReminder]
             do { reminders = try await self.reminderSource.reminders(in: settings.lists.map(\.id)) } catch {
                 self.tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
-                session.runner.send("closedb")
+                self.twoWayClose(session)
                 return
             }
             let builder = TasksBuilder(options: .init(lists: settings.lists.map { .init(id: $0.id, title: $0.title) },
@@ -2284,25 +2367,25 @@ final class AppState {
                                let appInfo = family.classicAppInfo(kind: .tasks, existing: appInfoData, categories: categories)
                                return (family.deviceDatabase(db, kind: .tasks, appInfo: appInfo), ids)
                            },
-                           completion: { session.runner.send("closedb") })
+                           completion: { self.twoWayClose(session) })
         }
     }
 
     private func twoWayMemos(_ session: Session, profile: DeviceProfile) {
         // die Memos schließen die Datenbank selbst (asynchron), auch bei jedem frühen Ende
         guard let tabId = session.tabId, let settings = profile.memoSync else {
-            session.runner.send("closedb")
+            self.twoWayClose(session)
             return
         }
         guard noteSource.hasAccess else {
             tabLog(tabId, L10n.logMemosNoAccess)
-            session.runner.send("closedb")
+            self.twoWayClose(session)
             return
         }
         let family = pimFamily(session)
         guard let appInfoData = session.calendarAppInfo, let categories = family.categories(ofAppInfo: appInfoData, kind: .memos) else {
             tabLog(tabId, L10n.logTwoWayFailed("\(family.databaseName(.memos)): AppInfo"))
-            session.runner.send("closedb")
+            self.twoWayClose(session)
             return
         }
         // der AppInfo des Palms (Sortierung) bleibt, ob Memo Pad oder Memos
@@ -2317,7 +2400,7 @@ final class AppState {
                 notes = try await Task.detached { try source.notes(in: folderIDs) }.value
             } catch {
                 self.tabLog(tabId, L10n.logTwoWayFailed(error.localizedDescription))
-                session.runner.send("closedb")
+                self.twoWayClose(session)
                 return
             }
             let builder = MemosBuilder(options: .init(folders: settings.folders.map { .init(id: $0.id, title: $0.title) },
@@ -2339,7 +2422,7 @@ final class AppState {
                                let appInfo = family.classicAppInfo(kind: .memos, existing: appInfoData, categories: categories)
                                return (family.deviceDatabase(db, kind: .memos, appInfo: appInfo), ids)
                            },
-                           completion: { session.runner.send("closedb") })
+                           completion: { self.twoWayClose(session) })
         }
     }
 
