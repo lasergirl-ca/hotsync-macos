@@ -91,6 +91,25 @@ private let deletedMemoRow = """
     #expect(categories?.named.map(\.name) == ["Unfiled", "Business", "Personal"])
 }
 
+@Test func readerReadsAnEmptyTable() {
+    // the T|X today: the schema and no rows, no categories of its own
+    var reader = CobaltDatabaseReader(kind: .memos)
+    #expect(reader.handle(.cobalt(.opened(handle: 4, name: "MemoDBS", creator: "mems", mode: 1))) == .send("cobaltschema 4 MemoDBSchema"))
+    for column in CobaltSchema.memo {
+        #expect(reader.handle(.cobalt(.column(handle: 4, table: "MemoDBSchema", column))) == .wait)
+    }
+    #expect(reader.handle(.cobalt(.schemaDone(handle: 4, table: "MemoDBSchema", count: 1))) == .send("cobaltcategories 4"))
+    #expect(reader.handle(.cobalt(.categoriesDone(handle: 4, count: 0))) == .send("cobaltreadall 4 MemoDBSchema"))
+    #expect(reader.handle(.cobalt(.rowsDone(handle: 4, table: "MemoDBSchema", rows: 0, tables: 1))) == .send("cobaltclose 4 0"))
+    #expect(reader.handle(.cobalt(.closed(handle: 4, name: "MemoDBS", token: nil))) == .finished)
+    #expect(reader.isDone && reader.failure == nil)
+
+    let read = reader.result
+    #expect(read?.rows.isEmpty == true && read?.records.isEmpty == true && read?.skipped.isEmpty == true && read?.warnings.isEmpty == true)
+    // the engine still gets a category block: Unfiled alone
+    #expect(PalmPIMFamily.cobalt.categories(ofAppInfo: read?.appInfo ?? Data(), kind: .memos)?.named.map(\.name) == ["Unfiled"])
+}
+
 @Test func readerRefusesADatabaseWhoseSchemaDiffers() throws {
     var reader = CobaltDatabaseReader(kind: .tasks)
     #expect(reader.handle(event(#"{"event": "cobaltOpened", "handle": 3, "name": "ToDoDBS", "creator": "tdos", "mode": 1}"#))
