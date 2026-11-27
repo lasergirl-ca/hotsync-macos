@@ -559,6 +559,10 @@ enum L10n {
             : s("HotSync für macOS: \(installed) installiert, \(failed) nicht",
                 "HotSync for macOS: \(installed) installed, \(failed) not")
     }
+    static var palmLogCobaltReadOnly: String { s(
+        "HotSync für macOS: Kalender, Kontakte, Aufgaben, Memos nur gelesen (Cobalt) - nichts geschrieben",
+        "HotSync for macOS: Calendar, Contacts, Tasks, Memos read only (Cobalt) - nothing written"
+    ) }
     static var palmLogNothingInstalled: String { s(
         "HotSync für macOS: Palm nicht zugeordnet, nichts installiert",
         "HotSync for macOS: Palm not assigned, nothing installed"

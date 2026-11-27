@@ -730,6 +730,9 @@ final class AppState {
         /// Cobalt: die Schema-Datenbank des laufenden Abgleichs wird über
         /// die cobalt*-Befehle gelesen (nur gelesen, siehe CobaltDatabaseReader)
         var cobaltReader: CobaltDatabaseReader?
+        /// Cobalt: ein Abgleich wurde nur gelesen und geplant - das steht
+        /// am Ende auch im HotSync-Log des Palms
+        var cobaltReadOnly = false
         var restoreFiles: [URL] = []
         var restoreDone = 0
         var restoreFailed = 0
@@ -1678,6 +1681,7 @@ final class AppState {
         session.files = files
         queue.beginInstall(files, session: session.token)
         deviceManager.updateRomVersion(session.romVersion, for: profileId)
+        deviceManager.updateDlpVersion(session.dlpVersion, for: profileId)
         deviceManager.updateCradleSyncSeen(session.cradleSync, for: profileId)
         if restoreRequests.remove(profileId) != nil {
             session.restoreFiles = backupFiles(for: profileId)
@@ -2095,6 +2099,7 @@ final class AppState {
         // bleibt auch der Mac, wie er war (sonst zwei Stände ohne Spiegel)
         if pimFamily(session) == .cobalt {
             tabLog(tabId, L10n.logTwoWayCobaltReadOnly)
+            session.cobaltReadOnly = true
             return
         }
         guard !profile.isDryRun else {
@@ -2621,6 +2626,7 @@ final class AppState {
 
     /// Alle Dateien sind durch: Eintrag ins HotSync-Log des Palms, Ende.
     private func endSession(_ session: Session) {
+        if session.cobaltReadOnly { session.runner.send("log " + L10n.palmLogCobaltReadOnly) }
         session.runner.send("log " + L10n.palmLogSummary(session.installed.count, session.failed.count))
         session.runner.send("end")
     }
