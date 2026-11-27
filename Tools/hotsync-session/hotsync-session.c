@@ -2969,6 +2969,235 @@ static void cobalt_close(int sd, const char *args)
 	pi_buffer_free(buf);
 }
 
+/* Gemeinsamer Anfang der Befehle mit "HANDLE [TABLE]": prüft das Handle,
+ * baut das Argument mit Handle (und ggf. Tabellenname) auf. 0 bei Unsinn. */
+static int cobalt_handle_args(const char *stage, const char *args, int want_table, int *handle, char *table, size_t cap)
+{
+	char fmt[32];
+	int n;
+
+	table[0] = '\0';
+	snprintf(fmt, sizeof(fmt), "%%i %%%lus", (unsigned long)(cap - 1));
+	n = sscanf(args, fmt, handle, table);
+	if (n < 1 + want_table || *handle < 1 || *handle > 255 || (want_table && strlen(table) > 31)) {
+		emit_error(stage, want_table ? "usage: %s HANDLE TABLE" : "usage: %s HANDLE", stage);
+		return 0;
+	}
+	return 1;
+}
+
+/* "cobalttables HANDLE": 0x71, ein cobaltTable pro Tabelle (Name, Spalten),
+ * dann cobaltTablesDone. */
+static void cobalt_tables(int sd, const char *args)
+{
+	int handle;
+	char table[COBALT_NAME_MAX];
+	struct cobalt_req r;
+	struct cobalt_reply rp;
+	pi_buffer_t *buf;
+
+	if (!cobalt_handle_args("cobalttables", args, 0, &handle, table, sizeof(table)))
+		return;
+	req_init(&r);
+	req_u8(&r, (unsigned)handle);
+	buf = pi_buffer_new(COBALT_REPLY_MAX);
+	if (cobalt_exec(sd, "cobalttables", 0x71, &r, buf, &rp) == 0) {
+		struct cobalt_cur c = { rp.arg, rp.arglen, 0 };
+		uint32_t count = cur_u32(&c), i;
+
+		for (i = 0; i < count && !c.bad; i++) {
+			uint32_t columns = cur_u32(&c);
+			cur_string(&c, table, sizeof(table));
+			if (c.bad)
+				break;
+			emit_begin("cobaltTable");
+			emit_int("handle", handle);
+			emit_str("name", table, 1);
+			emit_int("columns", (long)columns);
+			emit_end();
+		}
+		if (c.bad)
+			emit_error("cobalttables", "table list truncated");
+		emit_begin("cobaltTablesDone");
+		emit_int("handle", handle);
+		emit_int("count", (long)i);
+		emit_end();
+	}
+	pi_buffer_free(buf);
+}
+
+/* "cobaltschema HANDLE TABLE": 0x76, ein cobaltColumn pro Spalte (id,
+ * maxSize, type, attrib, name, err), dann cobaltSchemaDone. Typen wie im
+ * SDK: 0x10 VarChar, 0x0B Boolean, 0x12 DateTimeSecs, 0x0D Date, 0x05
+ * UInt8, 0x02 UInt16; Bit 7 = Vektor davon. */
+static void cobalt_schema(int sd, const char *args)
+{
+	int handle;
+	char table[COBALT_NAME_MAX];
+	struct cobalt_req r;
+	struct cobalt_reply rp;
+	pi_buffer_t *buf;
+
+	if (!cobalt_handle_args("cobaltschema", args, 1, &handle, table, sizeof(table)))
+		return;
+	req_init(&r);
+	req_u8(&r, (unsigned)handle);
+	req_string(&r, table);
+	buf = pi_buffer_new(COBALT_REPLY_MAX);
+	if (cobalt_exec(sd, "cobaltschema", 0x76, &r, buf, &rp) == 0) {
+		struct cobalt_cur c = { rp.arg, rp.arglen, 0 };
+		uint32_t count = cur_u32(&c), i;
+
+		for (i = 0; i < count && !c.bad; i++) {
+			uint32_t id = cur_u32(&c), max_size = cur_u32(&c), err;
+			unsigned type = cur_u8(&c), attrib = cur_u8(&c);
+			char name[COBALT_NAME_MAX];
+
+			cur_string(&c, name, sizeof(name));
+			err = cur_u32(&c);
+			if (c.bad)
+				break;
+			emit_begin("cobaltColumn");
+			emit_int("handle", handle);
+			emit_str("table", table, 1);
+			emit_int("id", (long)id);
+			emit_str("name", name, 1);
+			emit_int("type", type);
+			emit_int("attrib", attrib);
+			emit_int("maxSize", (long)max_size);
+			emit_int("err", (long)err);
+			emit_end();
+		}
+		if (c.bad)
+			emit_error("cobaltschema", "column list truncated");
+		emit_begin("cobaltSchemaDone");
+		emit_int("handle", handle);
+		emit_str("table", table, 1);
+		emit_int("count", (long)i);
+		emit_end();
+	}
+	pi_buffer_free(buf);
+}
+
+/* "cobaltcategories HANDLE": 0x98, ein cobaltCategory pro Kategorie (id,
+ * name), dann cobaltCategoriesDone. "Unfiled" (0) steht nicht in der
+ * Liste; es ist die stille Vorgabe. */
+static void cobalt_categories(int sd, const char *args)
+{
+	int handle;
+	char name[COBALT_NAME_MAX];
+	struct cobalt_req r;
+	struct cobalt_reply rp;
+	pi_buffer_t *buf;
+
+	if (!cobalt_handle_args("cobaltcategories", args, 0, &handle, name, sizeof(name)))
+		return;
+	req_init(&r);
+	req_u8(&r, (unsigned)handle);
+	buf = pi_buffer_new(COBALT_REPLY_MAX);
+	if (cobalt_exec(sd, "cobaltcategories", 0x98, &r, buf, &rp) == 0) {
+		struct cobalt_cur c = { rp.arg, rp.arglen, 0 };
+		uint32_t count = cur_u32(&c), i;
+
+		for (i = 0; i < count && !c.bad; i++) {
+			uint32_t id = cur_u32(&c);
+			cur_string(&c, name, sizeof(name));
+			if (c.bad)
+				break;
+			emit_begin("cobaltCategory");
+			emit_int("handle", handle);
+			emit_int("id", (long)id);
+			emit_str("name", name, 1);
+			emit_end();
+		}
+		if (c.bad)
+			emit_error("cobaltcategories", "category list truncated");
+		emit_begin("cobaltCategoriesDone");
+		emit_int("handle", handle);
+		emit_int("count", (long)i);
+		emit_end();
+	}
+	pi_buffer_free(buf);
+}
+
+/* "cobaltsyncstate HANDLE": 0x87 ohne Token (nur lesen). cobaltSyncState
+ * mit format, syncId, clock und den drei Purge-Zählern; syncable 0, wenn
+ * die Datenbank keinen Sync-Zustand führt (Länge 0). */
+static void cobalt_sync_state(int sd, const char *args)
+{
+	int handle;
+	char unused[COBALT_NAME_MAX];
+	struct cobalt_req r;
+	struct cobalt_reply rp;
+	pi_buffer_t *buf;
+
+	if (!cobalt_handle_args("cobaltsyncstate", args, 0, &handle, unused, sizeof(unused)))
+		return;
+	req_init(&r);
+	req_u8(&r, (unsigned)handle);
+	req_u32(&r, 0);		/* kein Token */
+	buf = pi_buffer_new(COBALT_REPLY_MAX);
+	if (cobalt_exec(sd, "cobaltsyncstate", 0x87, &r, buf, &rp) == 0) {
+		struct cobalt_cur c = { rp.arg, rp.arglen, 0 };
+		uint32_t len = cur_u32(&c);
+
+		emit_begin("cobaltSyncState");
+		emit_int("handle", handle);
+		if (len >= 16) {
+			uint32_t format = cur_u32(&c), sync_id = cur_u32(&c);
+			unsigned clock = cur_u16(&c), rows = cur_u16(&c), schemas = cur_u16(&c), cats = cur_u16(&c);
+
+			emit_int("syncable", !c.bad);
+			if (!c.bad) {
+				emit_int("format", (long)format);
+				emit_int("syncId", (long)sync_id);
+				emit_int("clock", clock);
+				emit_int("rowsPurge", rows);
+				emit_int("schemasPurge", schemas);
+				emit_int("categoryPurge", cats);
+			}
+		} else {
+			emit_int("syncable", 0);
+		}
+		emit_end();
+	}
+	pi_buffer_free(buf);
+}
+
+/* "cobaltrowcount HANDLE TABLE": 0x88 mit Flag 0 (gelöschte Zeilen
+ * mitgezählt). cobaltRowCount mit rows. */
+static void cobalt_row_count(int sd, const char *args)
+{
+	int handle;
+	char table[COBALT_NAME_MAX];
+	struct cobalt_req r;
+	struct cobalt_reply rp;
+	pi_buffer_t *buf;
+
+	if (!cobalt_handle_args("cobaltrowcount", args, 1, &handle, table, sizeof(table)))
+		return;
+	req_init(&r);
+	req_u8(&r, (unsigned)handle);
+	req_u8(&r, 0);
+	req_string(&r, table);
+	buf = pi_buffer_new(COBALT_REPLY_MAX);
+	if (cobalt_exec(sd, "cobaltrowcount", 0x88, &r, buf, &rp) == 0) {
+		struct cobalt_cur c = { rp.arg, rp.arglen, 0 };
+		uint32_t rows = cur_u32(&c);
+
+		if (c.bad) {
+			emit_error("cobaltrowcount", "short reply");
+		} else {
+			emit_begin("cobaltRowCount");
+			emit_int("handle", handle);
+			emit_str("table", table, 1);
+			emit_int("rows", (long)rows);
+			emit_end();
+		}
+	}
+	pi_buffer_free(buf);
+}
+
 static int wait_for_command(int sd)
 {
 	struct pollfd in = { .fd = STDIN_FILENO, .events = POLLIN };
@@ -3064,6 +3293,16 @@ static void run_commands(int sd)
 			cobalt_open(sd, line + 11);
 		} else if (strncmp(line, "cobaltclose ", 12) == 0) {
 			cobalt_close(sd, line + 12);
+		} else if (strncmp(line, "cobalttables ", 13) == 0) {
+			cobalt_tables(sd, line + 13);
+		} else if (strncmp(line, "cobaltschema ", 13) == 0) {
+			cobalt_schema(sd, line + 13);
+		} else if (strncmp(line, "cobaltcategories ", 17) == 0) {
+			cobalt_categories(sd, line + 17);
+		} else if (strncmp(line, "cobaltsyncstate ", 16) == 0) {
+			cobalt_sync_state(sd, line + 16);
+		} else if (strncmp(line, "cobaltrowcount ", 15) == 0) {
+			cobalt_row_count(sd, line + 15);
 		} else if (strcmp(line, "end") == 0) {
 			break;
 		} else if (line[0] != '\0') {
