@@ -1849,7 +1849,11 @@ static int connect_palm(const char *port, int timeout)
 		emit_end();
 		return -2;
 	}
-	if (sd == PI_ERR_SOCK_TIMEOUT) {
+	/* USB mit einem Palm, der zwischen den HotSyncs am Bus bleibt (Palm OS
+	 * Cobalt): u_wait_for_device findet ihn sofort, dann wartet pi_usb_accept
+	 * auf Daten; kommt kein HotSync, meldet libpisock PI_ERR_SOCK_LISTENER
+	 * statt eines Timeouts. Für die App ist es dasselbe: kein Palm. */
+	if (sd == PI_ERR_SOCK_TIMEOUT || sd == PI_ERR_SOCK_LISTENER) {
 		emit_begin("timeout");
 		emit_end();
 		return -2;
