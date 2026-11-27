@@ -3198,6 +3198,309 @@ static void cobalt_row_count(int sd, const char *args)
 	pi_buffer_free(buf);
 }
 
+/* ------------------------------------------------------------------------
+ * 0xAE: Zeilen einer Schema-Datenbank lesen (Schritt 3 von
+ * Planning/cobalt-pim.md). Ein Request, ein Datenstrom als Antwort:
+ *
+ *   u8 1, u32 X                 X = 0: alles in dieser Nachricht; sonst
+ *                               (0x8000 gesehen) folgt mehr, Rahmen unbekannt
+ *   je Zeile: 40 Bytes Kopf     u32 presentFlags, u32 err, u32 rowID,
+ *                               u16 rowAttr, u32 tableIndex, u16 syncStatus,
+ *                               u32 numCats, u32 8, u32 numCols, u32 catBytes,
+ *                               4 Bytes, die der Palm nicht beschreibt
+ *             numCats x u32     Kategorien
+ *             numCols x 16      u32 colID, u32 size, u32 offset, u32 err
+ *             Spaltenbytes      hintereinander, offset zeigt hinein; roh
+ *                               (little-endian ARM), hier nicht gedeutet
+ *   nTables x 32 Bytes          Tabellennamen (bis zur NUL, Rest Zufall)
+ *   u32 rowCount, u32 nTables   Abschluss; ohne Zeilen fehlt die Namenstafel
+ *
+ * Danach schickt der Palm in derselben Transaktion eine leere F0-AE-
+ * Nachricht (argc 0, err 0); sie wird nach dem Zerlegen abgeholt.
+ * rowAttr: 0x80 gelöscht (Zeile ohne Spalten), 0x01 archiviert, 0x02
+ * schreibgeschützt, 0x10 geheim. syncStatus: Bits 0/1 geändert seit der
+ * Sync-Uhr, 4 gelöscht, 8 archiviert.
+ * ------------------------------------------------------------------------ */
+
+#define COBALT_ROW_FIELDS	0x0B	/* Zeileninfo, Kategorien, alle Spalten */
+#define COBALT_ROW_HEADER	40
+#define COBALT_TABLE_ENTRY	32
+#define COBALT_READROWS_MAX	512
+
+/* Zerlegt das Argument einer 0xAE-Antwort und gibt je Zeile ein
+ * cobaltRow aus. 0 und die Zählwerte bei Erfolg, -1 nach einem
+ * error-Ereignis (Strom zu kurz, X != 0, Index ohne Tabelle). fallback
+ * ist der Tabellenname aus dem Befehl, falls der Palm keinen Index
+ * liefert (selector 0 für eine unbekannte Zeile). */
+static int cobalt_parse_rows(const char *stage, int handle, const char *fallback,
+			     const uint8_t *arg, size_t arglen, uint32_t *rows_out, uint32_t *tables_out)
+{
+	struct cobalt_cur c;
+	const uint8_t *names;
+	uint32_t x, row_count, n_tables, rows = 0;
+	size_t names_len;
+
+	if (arglen < 13) {
+		emit_error(stage, "short 0xAE reply (%lu bytes)", (unsigned long)arglen);
+		return -1;
+	}
+	if (arg[0] != 1) {
+		emit_error(stage, "0xAE reply starts with 0x%02x, not 1", arg[0]);
+		return -1;
+	}
+	x = (uint32_t)arg[1] << 24 | (uint32_t)arg[2] << 16 | (uint32_t)arg[3] << 8 | arg[4];
+	if (x != 0) {
+		/* Mehr als eine Nachricht: wie die Fortsetzung gerahmt ist, hat
+		 * noch kein Gerät gezeigt (Planning/cobalt-pim.md, Frage 2).
+		 * Ausweg: cobaltreadrows mit Zeilen-IDs in kleinen Gruppen. */
+		emit_error(stage, "0xAE result does not fit one message (X=0x%08lx); use cobaltreadrows in smaller groups",
+			   (unsigned long)x);
+		return -1;
+	}
+	/* Abschluss zuerst: er sagt, wo die Namenstafel beginnt */
+	c.p = arg + arglen - 8;
+	c.left = 8;
+	c.bad = 0;
+	row_count = cur_u32(&c);
+	n_tables = cur_u32(&c);
+	names_len = (size_t)n_tables * COBALT_TABLE_ENTRY;
+	if (n_tables > 0xFFFF || arglen - 13 < names_len) {
+		emit_error(stage, "0xAE reply claims %lu tables in %lu bytes", (unsigned long)n_tables, (unsigned long)arglen);
+		return -1;
+	}
+	names = arg + arglen - 8 - names_len;
+	c.p = arg + 5;
+	c.left = (size_t)(names - (arg + 5));
+	c.bad = 0;
+
+	while (c.left > 0) {
+		const uint8_t *h = cur_take(&c, COBALT_ROW_HEADER);
+		uint32_t present, err, row_id, table_index, num_cats, num_cols, i, data_len = 0;
+		unsigned attr, status;
+		const uint8_t *cats, *cols, *data;
+		char table[COBALT_TABLE_ENTRY];
+
+		if (c.bad || h == NULL)
+			break;
+		present = (uint32_t)h[0] << 24 | (uint32_t)h[1] << 16 | (uint32_t)h[2] << 8 | h[3];
+		err = (uint32_t)h[4] << 24 | (uint32_t)h[5] << 16 | (uint32_t)h[6] << 8 | h[7];
+		row_id = (uint32_t)h[8] << 24 | (uint32_t)h[9] << 16 | (uint32_t)h[10] << 8 | h[11];
+		attr = (unsigned)h[12] << 8 | h[13];
+		table_index = (uint32_t)h[14] << 24 | (uint32_t)h[15] << 16 | (uint32_t)h[16] << 8 | h[17];
+		status = (unsigned)h[18] << 8 | h[19];
+		num_cats = (uint32_t)h[20] << 24 | (uint32_t)h[21] << 16 | (uint32_t)h[22] << 8 | h[23];
+		num_cols = (uint32_t)h[28] << 24 | (uint32_t)h[29] << 16 | (uint32_t)h[30] << 8 | h[31];
+		/* h[24..27] ist immer 8, h[32..35] = 4 * numCats, h[36..39] Zufall */
+		if (num_cats > c.left / 4 || num_cols > c.left / 16) {
+			c.bad = 1;
+			break;
+		}
+		cats = cur_take(&c, (size_t)num_cats * 4);
+		cols = cur_take(&c, (size_t)num_cols * 16);
+		if (c.bad)
+			break;
+		for (i = 0; i < num_cols; i++) {
+			const uint8_t *e = cols + 16 * i;
+			uint32_t size = (uint32_t)e[4] << 24 | (uint32_t)e[5] << 16 | (uint32_t)e[6] << 8 | e[7];
+			uint32_t offset = (uint32_t)e[8] << 24 | (uint32_t)e[9] << 16 | (uint32_t)e[10] << 8 | e[11];
+			if (size > c.left || offset > c.left - size) {
+				c.bad = 1;
+				break;
+			}
+			if (offset + size > data_len)
+				data_len = offset + size;
+		}
+		if (c.bad)
+			break;
+		data = cur_take(&c, data_len);
+		if (c.bad)
+			break;
+
+		if (table_index < n_tables) {
+			const uint8_t *e = names + (size_t)table_index * COBALT_TABLE_ENTRY;
+			size_t k;
+			for (k = 0; k + 1 < COBALT_TABLE_ENTRY && e[k] != '\0'; k++)
+				table[k] = (char)e[k];
+			table[k] = '\0';
+		} else {
+			snprintf(table, sizeof(table), "%s", fallback);
+		}
+
+		emit_begin("cobaltRow");
+		emit_int("handle", handle);
+		emit_str("table", table, 1);
+		emit_int("rowId", (long)row_id);
+		emit_int("attr", (long)attr);
+		emit_int("syncStatus", (long)status);
+		emit_int("modified", (status & 3) != 0);
+		emit_int("deleted", (attr & 0x80) != 0 || (status & 4) != 0);
+		emit_int("archived", (attr & 0x01) != 0 || (status & 8) != 0);
+		emit_int("present", (long)present);
+		emit_int("err", (long)err);
+		fputs(",\"categories\":[", stdout);
+		for (i = 0; i < num_cats; i++) {
+			const uint8_t *e = cats + 4 * i;
+			printf("%s%lu", i ? "," : "",
+			       (unsigned long)((uint32_t)e[0] << 24 | (uint32_t)e[1] << 16 | (uint32_t)e[2] << 8 | e[3]));
+		}
+		fputs("],\"columns\":[", stdout);
+		for (i = 0; i < num_cols; i++) {
+			const uint8_t *e = cols + 16 * i;
+			uint32_t id = (uint32_t)e[0] << 24 | (uint32_t)e[1] << 16 | (uint32_t)e[2] << 8 | e[3];
+			uint32_t size = (uint32_t)e[4] << 24 | (uint32_t)e[5] << 16 | (uint32_t)e[6] << 8 | e[7];
+			uint32_t offset = (uint32_t)e[8] << 24 | (uint32_t)e[9] << 16 | (uint32_t)e[10] << 8 | e[11];
+			uint32_t cerr = (uint32_t)e[12] << 24 | (uint32_t)e[13] << 16 | (uint32_t)e[14] << 8 | e[15];
+			printf("%s{\"id\":%lu,\"size\":%lu,\"err\":%lu", i ? "," : "",
+			       (unsigned long)id, (unsigned long)size, (unsigned long)cerr);
+			emit_hex("hex", data + offset, size);
+			putchar('}');
+		}
+		putchar(']');
+		emit_end();
+		rows++;
+	}
+	if (c.bad) {
+		emit_error(stage, "0xAE row stream truncated after %lu of %lu rows", (unsigned long)rows, (unsigned long)row_count);
+		return -1;
+	}
+	if (rows != row_count)
+		emit_error(stage, "0xAE reply counts %lu rows but carried %lu", (unsigned long)row_count, (unsigned long)rows);
+	*rows_out = rows;
+	*tables_out = n_tables;
+	return 0;
+}
+
+/* Holt die leere zweite F0-AE-Nachricht ab, die jeden 0xAE-Strom
+ * abschließt. 0, wenn sie so aussah; sonst ist ein Ereignis draußen. */
+static int cobalt_drain_rows_end(int sd, const char *stage)
+{
+	pi_buffer_t *buf = pi_buffer_new(64);
+	struct cobalt_reply rp;
+	int ok;
+
+	ok = cobalt_read_reply(sd, stage, 0xAE, buf, &rp) == 0;
+	if (ok && (rp.argc != 0 || rp.err != 0)) {
+		emit_error(stage, "second 0xAE message is not empty (argc %d, err %d)", rp.argc, rp.err);
+		ok = 0;
+	}
+	pi_buffer_free(buf);
+	return ok ? 0 : -1;
+}
+
+/* Schickt den fertigen 0xAE-Request, zerlegt die Daten, holt die leere
+ * Nachricht ab und meldet cobaltRowsDone. */
+static void cobalt_read_rows_exec(int sd, const char *stage, int handle, const char *table, struct cobalt_req *r)
+{
+	struct cobalt_reply rp;
+	pi_buffer_t *buf = pi_buffer_new(COBALT_REPLY_MAX);
+	uint32_t rows = 0, tables = 0;
+	int rc;
+
+	rc = cobalt_exec(sd, stage, 0xAE, r, buf, &rp);
+	if (rc == 0) {
+		rc = cobalt_parse_rows(stage, handle, table, rp.arg, rp.arglen, &rows, &tables);
+		/* die leere Nachricht gehört zur selben Transaktion: in jedem
+		 * Fall abholen, sonst liest der nächste Befehl sie als Antwort */
+		if (cobalt_drain_rows_end(sd, stage) < 0)
+			rc = -1;
+	}
+	if (rc == 0) {
+		emit_begin("cobaltRowsDone");
+		emit_int("handle", handle);
+		emit_str("table", table, 1);
+		emit_int("rows", (long)rows);
+		emit_int("tables", (long)tables);
+		emit_end();
+	}
+	pi_buffer_free(buf);
+}
+
+/* "cobaltreadall HANDLE TABLE [FILTER]": 0xAE mit Selector 1 (Tabellen-
+ * scan). FILTER fehlt oder "all": jede Zeile mit ihrem syncStatus,
+ * gelöschte eingeschlossen. "modified" (nur seit dem Token geänderte
+ * Zeilen) ist noch nicht freigegeben: der Filterwert ist unbestätigt
+ * (Planning/cobalt-pim.md, Abschnitt 3.2 und row-commands 14). */
+static void cobalt_read_all(int sd, const char *args)
+{
+	int handle, n;
+	char table[COBALT_NAME_MAX], filter[16];
+	struct cobalt_req r;
+
+	filter[0] = '\0';
+	n = sscanf(args, "%i %63s %15s", &handle, table, filter);
+	if (n < 2 || handle < 1 || handle > 255 || strlen(table) > 31) {
+		emit_error("cobaltreadall", "usage: cobaltreadall HANDLE TABLE [all|modified]");
+		return;
+	}
+	if (strcmp(filter, "modified") == 0) {
+		/* TODO: filter mask for "changed since the sync clock" (0x2000?
+		 * bit 31?) is unconfirmed; needs a device with a stored token. */
+		emit_error("cobaltreadall", "the modified-rows filter is not supported yet (filter value unknown)");
+		return;
+	}
+	if (filter[0] != '\0' && strcmp(filter, "all") != 0 && strcmp(filter, "0") != 0) {
+		emit_error("cobaltreadall", "usage: cobaltreadall HANDLE TABLE [all|modified]");
+		return;
+	}
+	req_init(&r);
+	req_u8(&r, (unsigned)handle);
+	req_u32(&r, 1);				/* selector: table scan */
+	req_u32(&r, COBALT_ROW_FIELDS);
+	req_u32(&r, 0);				/* filter: every row */
+	req_u32(&r, 1);				/* matchMode any */
+	req_u32(&r, 0);				/* numCats: all categories */
+	req_u16(&r, 0);
+	req_u8(&r, 0);				/* the unexplained extra byte */
+	req_bytes(&r, table, strlen(table) + 1);	/* C string, no length */
+	cobalt_read_rows_exec(sd, "cobaltreadall", handle, table, &r);
+}
+
+/* "cobaltreadrows HANDLE ROWID[,ROWID...]": 0xAE mit Selector 0, die
+ * genannten Zeilen (dezimal oder 0x-hex). Eine unbekannte ID kommt als
+ * Zeile mit err (5) und ohne Spalten zurück. Der Ausweg für Ergebnisse,
+ * die nicht in eine Nachricht passen. */
+static void cobalt_read_rows(int sd, const char *args)
+{
+	int handle, n = 0;
+	char list[4096];
+	const char *p;
+	uint32_t ids[COBALT_READROWS_MAX];
+	struct cobalt_req r;
+	int i;
+
+	list[0] = '\0';
+	if (sscanf(args, "%i %4095s", &handle, list) < 2 || handle < 1 || handle > 255) {
+		emit_error("cobaltreadrows", "usage: cobaltreadrows HANDLE ROWID[,ROWID...]");
+		return;
+	}
+	p = list;
+	while (*p != '\0') {
+		char *end;
+		unsigned long v = strtoul(p, &end, 0);
+		if (end == p || v > 0xFFFFFFFFul || (*end != ',' && *end != '\0') || n >= COBALT_READROWS_MAX) {
+			emit_error("cobaltreadrows", "bad row id list (up to %d ids, decimal or 0x hex, comma separated)",
+				   COBALT_READROWS_MAX);
+			return;
+		}
+		ids[n++] = (uint32_t)v;
+		p = (*end == ',') ? end + 1 : end;
+	}
+	if (n == 0) {
+		emit_error("cobaltreadrows", "usage: cobaltreadrows HANDLE ROWID[,ROWID...]");
+		return;
+	}
+	req_init(&r);
+	req_u8(&r, (unsigned)handle);
+	req_u32(&r, 0);				/* selector: row ids */
+	req_u32(&r, COBALT_ROW_FIELDS);
+	req_u32(&r, (uint32_t)n);
+	req_u16(&r, 0);
+	req_u8(&r, 0);
+	for (i = 0; i < n; i++)
+		req_u32(&r, ids[i]);
+	cobalt_read_rows_exec(sd, "cobaltreadrows", handle, "", &r);
+}
+
 static int wait_for_command(int sd)
 {
 	struct pollfd in = { .fd = STDIN_FILENO, .events = POLLIN };
@@ -3303,6 +3606,10 @@ static void run_commands(int sd)
 			cobalt_sync_state(sd, line + 16);
 		} else if (strncmp(line, "cobaltrowcount ", 15) == 0) {
 			cobalt_row_count(sd, line + 15);
+		} else if (strncmp(line, "cobaltreadall ", 14) == 0) {
+			cobalt_read_all(sd, line + 14);
+		} else if (strncmp(line, "cobaltreadrows ", 15) == 0) {
+			cobalt_read_rows(sd, line + 15);
 		} else if (strcmp(line, "end") == 0) {
 			break;
 		} else if (line[0] != '\0') {
