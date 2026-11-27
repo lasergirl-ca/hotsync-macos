@@ -1178,9 +1178,9 @@ final class AppState {
             if let tabId = session.tabId { tabLog(tabId, L10n.logSessionError(portLabel(port), stage, message)) }
 
         case .dbOpened, .dbClosed, .appInfo, .appInfoWritten, .record, .recordsDone,
-             .recordWritten, .recordDeleted, .flagsReset, .cleanedUp, .syncInfoWritten:
+             .recordWritten, .recordDeleted, .flagsReset, .cleanedUp, .syncInfoWritten, .cobalt:
             // Datensatzzugriff außerhalb der Kalenderprüfung: gehört dem
-            // Abgleich, den die App noch nicht fährt
+            // Abgleich, den die App noch nicht fährt (Cobalt-Zeilen ebenso)
             break
         }
     }

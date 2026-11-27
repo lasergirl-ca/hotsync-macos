@@ -131,6 +131,11 @@ public enum SessionEvent: Equatable, Sendable {
     /// (otherwise a side went away, an `error` said which)
     case relayFinished(packets: Int, bytes: Int, ended: Bool)
 
+    // Palm OS Cobalt: schema databases (the `cobalt...` commands)
+
+    /// an answer of one of the Cobalt commands, see `CobaltEvent`
+    case cobalt(CobaltEvent)
+
     private struct Line: Decodable {
         let event: String
         let port: String?
@@ -297,6 +302,9 @@ public enum SessionEvent: Equatable, Sendable {
         case "relayFinished":
             return .relayFinished(packets: l.packets ?? 0, bytes: l.bytes ?? 0, ended: (l.ended ?? 0) != 0)
         default:
+            if l.event.hasPrefix("cobalt"), let cobalt = CobaltEvent.parse(event: l.event, data: data) {
+                return .cobalt(cobalt)
+            }
             return nil
         }
     }
