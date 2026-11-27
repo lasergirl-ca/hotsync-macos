@@ -13,7 +13,10 @@ and column names, categories, sync ids of a fresh store). Two replies are
 synthetic and marked as such: an unknown-handle error and a long-form
 argument header, both never seen from the device but part of the framing.
 The NET handshake and the classic replies (ReadSysInfo, ReadUserInfo,
-OpenConduit, EndOfSync) come from test-relay.py."""
+OpenConduit, EndOfSync) come from test-relay.py.
+
+A reply given as a tuple is several messages sent one after the other for
+one request (0xAE answers with the row stream and then an empty F0 AE)."""
 
 import importlib.util
 import os
@@ -106,6 +109,70 @@ REPLAY = {
         "f07601000000201f00000001000000640000fffe1000000000094d656d6f546578740000000000"],
 }
 
+# 0xAE table scans (handle 1, selector 1, A 0x0B, filter 0, matchMode 1, no
+# categories, table name as a C string). The T|X answered each with the
+# data message and then the empty F0 AE message of the same transaction.
+AE_EMPTY_END = "f0ae00000000"
+REPLAY["70ae0100202c01000000010000000b00000000000000010000000000000041646472657373426f6f6b4442536368656d6100"] = [
+    # empty table: prefix 01 + X 0, no rows, no name table, rowCount 0, nTables 0
+    ("f0ae01000000200d01000000000000000000000000", AE_EMPTY_END)]
+REPLAY["70ae0100202b01000000010000000b00000000000000010000000000000041646472657373426f6f6b417070496e666f00"] = [
+    # AddressBookAppInfo: one row 0x807BE001, syncStatus 3, no categories,
+    # column 100 = 2 bytes 53 55; then the 32-byte name entry (19 bytes of
+    # name with NUL, 13 uninitialised) and rowCount 1, nTables 1
+    ("f0ae01000000206701000000000000000b00000000807be0010000000000000003000000000000000800000001000000005300504400"
+     "000064000000020000000000000000535541646472657373426f6f6b417070496e666f00000100000004fa121c640000000000000100000001",
+     AE_EMPTY_END)]
+
+
+def ae_row(row_id, attr, status, cats, cols, present=0x0B, err=0, table_index=0, junk="deadbeef"):
+    """One row record of the 0xAE stream (section 9 of the design note):
+    the 40-byte header (36 written, 4 uninitialised), the categories, the
+    16-byte column entries and the concatenated column bytes."""
+    data = b""
+    entries = b""
+    for col_id, value in cols:
+        entries += struct.pack(">IIII", col_id, len(value), len(data), 0)
+        data += value
+    head = struct.pack(">IIIHIHIIII", present, err, row_id, attr, table_index, status, len(cats), 8, len(cols), 4 * len(cats))
+    return head + bytes.fromhex(junk) + b"".join(struct.pack(">I", c) for c in cats) + entries + data
+
+
+def ae_reply(x, rows, tables):
+    """A complete 0xAE data message: prefix, rows, the 32-byte name entries
+    (name with NUL, then non-zero junk the reader must not take as name),
+    the trailer. No name table when there are no rows (as the T|X did)."""
+    body = bytes([1]) + struct.pack(">I", x) + b"".join(rows)
+    if rows:
+        for name in tables:
+            entry = name.encode() + b"\0"
+            body += entry + bytes(range(0xA1, 0xA1 + 32 - len(entry)))
+    body += struct.pack(">II", len(rows), len(tables) if rows else 0)
+    assert len(body) < 256
+    return "f0ae01000000" + bytes([0x20, len(body)]).hex() + body.hex()
+
+
+# MemoDBSchema scans on handle 4 (the probe's request bytes): the T|X's
+# empty answer first, then synthesized rows per the emulator's one-row
+# layout: a new row in category 0x11 (Personal) with MemoText "hello\0",
+# a deleted row (attr 0x80, syncStatus 4) without categories or columns;
+# then an X = 0x8000 answer (a result over one message) with the same rows.
+MEMO_ROWS = [ae_row(0x80C48001, 0, 3, [0x11], [(100, b"hello\0")]),
+             ae_row(0x80C48002, 0x80, 4, [], [], present=0x01, junk="cafebabe")]
+REPLAY["70ae0100202504000000010000000b0000000000000001000000000000004d656d6f4442536368656d6100"] = [
+    ("f0ae01000000200d01000000000000000000000000", AE_EMPTY_END),
+    (ae_reply(0, MEMO_ROWS, ["MemoDBSchema"]), AE_EMPTY_END),
+    (ae_reply(0x8000, MEMO_ROWS, ["MemoDBSchema"]), AE_EMPTY_END)]
+
+# 0xAE by row id (selector 0, A 0x0B, count 3, u16 0, u8 0, the ids), on
+# handle 4, synthesized: the two memo rows plus an unknown id 5, which comes
+# back as a row with err 5, presentFlags 0 and tableIndex 0xFFFFFFFF. The
+# first memo row here has two columns to check the offsets.
+TWO_COL_ROW = ae_row(0x80C48001, 0, 1, [0x10, 0x11], [(100, b"hello\0"), (200, b"\x01\x02\x03")])
+REPLAY["70ae0100201c04000000000000000b00000003000000" "80c4800180c4800200000005"] = [
+    (ae_reply(0, [TWO_COL_ROW, MEMO_ROWS[1], ae_row(5, 0, 0, [], [], present=0, err=5, table_index=0xFFFFFFFF)],
+              ["MemoDBSchema"]), AE_EMPTY_END)]
+
 # The 59-column AddressBookDBSchema reply is 1672 bytes; only its first
 # three columns (Title, LastName, MiddleName) and the count are replayed.
 # The tool reports a truncated list as an error after the rows it got.
@@ -141,7 +208,9 @@ def fake_cobalt_palm(port, unexpected, done):
                 # error 4 (bad parameter) with the command's reply word
                 net.send(bytes([0xF0, req[1], 0, 0, 0, 4]))
             else:
-                net.send(bytes.fromhex(replies[0] if len(replies) == 1 else replies.pop(0)))
+                reply = replies[0] if len(replies) == 1 else replies.pop(0)
+                for message in (reply if isinstance(reply, tuple) else (reply,)):
+                    net.send(bytes.fromhex(message))
         elif fn == 0x12:
             net.send(SYSINFO_REPLY)
         elif fn == 0x10:
@@ -282,13 +351,77 @@ def test_memo(s):
     print("ok: MemoDBS handle 4, MemoText id 100 type 0x10 maxSize 0xFFFE, 2 categories, clock 1")
 
 
+def test_rows_address(s):
+    """0xAE scans replayed from the probe: an empty table, then the one
+    AddressBookAppInfo row (handle 1 is still open: the close with 0x20
+    failed with 15)."""
+    evs = s.run("cobaltreadall 1 AddressBookDBSchema", {"cobaltRowsDone", "error"})
+    assert evs == [{"event": "cobaltRowsDone", "handle": 1, "table": "AddressBookDBSchema", "rows": 0, "tables": 0}], evs
+
+    evs = s.run("cobaltreadall 1 AddressBookAppInfo", {"cobaltRowsDone", "error"})
+    assert evs == [
+        {"event": "cobaltRow", "handle": 1, "table": "AddressBookAppInfo", "rowId": 0x807BE001, "attr": 0,
+         "syncStatus": 3, "modified": 1, "deleted": 0, "archived": 0, "present": 0x0B, "err": 0,
+         "categories": [], "columns": [{"id": 100, "size": 2, "err": 0, "hex": "5355"}]},
+        {"event": "cobaltRowsDone", "handle": 1, "table": "AddressBookAppInfo", "rows": 1, "tables": 1}], evs
+    # the next command still gets its own reply (the empty F0 AE was drained)
+    evs = s.run("cobaltrowcount 1 AddressBookAppInfo", {"cobaltRowCount", "error"})
+    assert evs[0] == {"event": "cobaltRowCount", "handle": 1, "table": "AddressBookAppInfo", "rows": 1}, evs
+    print("ok: 0xAE scans from the probe: 0 rows, then the AppInfo row (0x807BE001, column 100 = 53 55)")
+
+
+def test_rows_memo(s):
+    """Synthesized MemoDBSchema streams on handle 4: the probe's empty
+    answer, two rows (one new in Personal with "hello", one deleted), rows
+    by id, and the X = 0x8000 error path."""
+    evs = s.run("cobaltreadall 4 MemoDBSchema", {"cobaltRowsDone", "error"})
+    assert evs[-1] == {"event": "cobaltRowsDone", "handle": 4, "table": "MemoDBSchema", "rows": 0, "tables": 0}, evs
+
+    evs = s.run("cobaltreadall 4 MemoDBSchema all", {"cobaltRowsDone", "error"})
+    assert evs == [
+        {"event": "cobaltRow", "handle": 4, "table": "MemoDBSchema", "rowId": 0x80C48001, "attr": 0, "syncStatus": 3,
+         "modified": 1, "deleted": 0, "archived": 0, "present": 0x0B, "err": 0, "categories": [0x11],
+         "columns": [{"id": 100, "size": 6, "err": 0, "hex": "68656c6c6f00"}]},
+        {"event": "cobaltRow", "handle": 4, "table": "MemoDBSchema", "rowId": 0x80C48002, "attr": 0x80, "syncStatus": 4,
+         "modified": 0, "deleted": 1, "archived": 0, "present": 0x01, "err": 0, "categories": [], "columns": []},
+        {"event": "cobaltRowsDone", "handle": 4, "table": "MemoDBSchema", "rows": 2, "tables": 1}], evs
+
+    evs = s.run("cobaltreadrows 4 0x80C48001,2160361474,5", {"cobaltRowsDone", "error"})
+    assert evs == [
+        {"event": "cobaltRow", "handle": 4, "table": "MemoDBSchema", "rowId": 0x80C48001, "attr": 0, "syncStatus": 1,
+         "modified": 1, "deleted": 0, "archived": 0, "present": 0x0B, "err": 0, "categories": [0x10, 0x11],
+         "columns": [{"id": 100, "size": 6, "err": 0, "hex": "68656c6c6f00"}, {"id": 200, "size": 3, "err": 0, "hex": "010203"}]},
+        {"event": "cobaltRow", "handle": 4, "table": "MemoDBSchema", "rowId": 0x80C48002, "attr": 0x80, "syncStatus": 4,
+         "modified": 0, "deleted": 1, "archived": 0, "present": 0x01, "err": 0, "categories": [], "columns": []},
+        {"event": "cobaltRow", "handle": 4, "table": "", "rowId": 5, "attr": 0, "syncStatus": 0,
+         "modified": 0, "deleted": 0, "archived": 0, "present": 0, "err": 5, "categories": [], "columns": []},
+        {"event": "cobaltRowsDone", "handle": 4, "table": "", "rows": 3, "tables": 1}], evs
+
+    # a result that does not fit one message (X = 0x8000): one error, no
+    # rows, no done event; the empty message is drained so the next
+    # command still works
+    evs = s.run("cobaltreadall 4 MemoDBSchema", {"cobaltRowsDone", "error"})
+    assert len(evs) == 1 and evs[0]["event"] == "error" and evs[0]["stage"] == "cobaltreadall", evs
+    assert "X=0x00008000" in evs[0]["message"] and "cobaltreadrows" in evs[0]["message"], evs[0]
+    evs = s.run("cobaltsyncstate 4", {"cobaltSyncState", "error"})
+    assert evs[0]["event"] == "cobaltSyncState" and evs[0]["syncId"] == 0x4E8D58BF, evs
+
+    # the modified-rows filter is refused until its value is confirmed
+    evs = s.run("cobaltreadall 4 MemoDBSchema modified", {"error"})
+    assert "modified-rows filter" in evs[0]["message"], evs
+    print("ok: synthesized memo rows (hello in Personal, one deleted), rows by id with an unknown id, X=0x8000 refused")
+
+
 def test_usage(s):
     """Bad command lines never reach the Palm."""
     for line, stage in [("cobaltopen MemoDBS mems", "cobaltopen"), ("cobaltopen MemoDBS mem 1", "cobaltopen"),
                         ("cobaltopen MemoDBS mems 1 abc", "cobaltopen"), ("cobaltclose 0", "cobaltclose"),
-                        ("cobaltschema 1", "cobaltschema"), ("cobaltrowcount x y", "cobaltrowcount")]:
+                        ("cobaltschema 1", "cobaltschema"), ("cobaltrowcount x y", "cobaltrowcount"),
+                        ("cobaltreadall 1", "cobaltreadall"), ("cobaltreadall 1 MemoDBSchema some", "cobaltreadall"),
+                        ("cobaltreadrows 1", "cobaltreadrows"), ("cobaltreadrows 1 1,x", "cobaltreadrows"),
+                        ("cobaltreadrows 1 0x100000000", "cobaltreadrows")]:
         evs = s.run(line, {"error"})
-        assert evs[0]["stage"] == stage and ("usage" in evs[0]["message"] or "hex" in evs[0]["message"]), (line, evs)
+        assert evs[0]["stage"] == stage and any(w in evs[0]["message"] for w in ("usage", "hex", "row id")), (line, evs)
     print("ok: malformed command lines are refused before anything is sent")
 
 
@@ -298,6 +431,8 @@ def main():
     test_list(s)
     test_address(s)
     test_memo(s)
+    test_rows_address(s)
+    test_rows_memo(s)
     test_usage(s)
     s.end()
     print("all Cobalt tests passed")
