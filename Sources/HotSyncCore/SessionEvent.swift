@@ -187,10 +187,14 @@ public enum SessionEvent: Equatable, Sendable {
     /// Reads one output line; nil for anything that is not a known event
     /// (the tool only prints events, so nil means a broken line).
     public static func parse(_ line: String) -> SessionEvent? {
-        guard let data = line.data(using: .utf8),
-              let l = try? JSONDecoder().decode(Line.self, from: data) else {
-            return nil
+        guard let data = line.data(using: .utf8) else { return nil }
+        // the Cobalt events have their own fields (and reuse names such as
+        // `version` with other types): decoded by CobaltEvent
+        struct Tag: Decodable { let event: String }
+        if let tag = try? JSONDecoder().decode(Tag.self, from: data), tag.event.hasPrefix("cobalt") {
+            return CobaltEvent.parse(event: tag.event, data: data).map { .cobalt($0) }
         }
+        guard let l = try? JSONDecoder().decode(Line.self, from: data) else { return nil }
         switch l.event {
         case "listening":
             return .listening(port: l.port ?? "")
@@ -302,9 +306,6 @@ public enum SessionEvent: Equatable, Sendable {
         case "relayFinished":
             return .relayFinished(packets: l.packets ?? 0, bytes: l.bytes ?? 0, ended: (l.ended ?? 0) != 0)
         default:
-            if l.event.hasPrefix("cobalt"), let cobalt = CobaltEvent.parse(event: l.event, data: data) {
-                return .cobalt(cobalt)
-            }
             return nil
         }
     }
