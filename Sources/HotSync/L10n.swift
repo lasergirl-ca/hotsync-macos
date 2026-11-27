@@ -579,6 +579,10 @@ enum L10n {
         "Palm OS \(version) (Cobalt): Kalender, Kontakte, Aufgaben und Memos werden gelesen und der Plan gezeigt – geschrieben wird noch nichts, weder auf den Palm noch auf den Mac",
         "Palm OS \(version) (Cobalt): Calendar, Contacts, Tasks and Memos are read and the plan shown – nothing is written yet, neither to the Palm nor to the Mac"
     ) }
+    static func logCobaltSkipsGarnetPIM(_ file: String) -> String { s(
+        "\(file) kommt nicht auf einen Cobalt-Palm: seine Kalender, Kontakte, Aufgaben und Memos liegen in Schema-Datenbanken – die Datei geht in den Papierkorb",
+        "\(file) does not go onto a Cobalt Palm: its Calendar, Contacts, Tasks and Memos live in schema databases – the file goes to the Trash"
+    ) }
     static func logCobaltOneWayUnsupported(_ what: String) -> String { s(
         "\(what): auf einen Cobalt-Palm wird noch nichts installiert; nur der Abgleich in beide Richtungen liest ihn",
         "\(what): nothing is installed on a Cobalt Palm yet; only the two-way sync reads it"

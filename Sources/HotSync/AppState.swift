@@ -1677,7 +1677,18 @@ final class AppState {
         // "Nur abgleichen": von der Warteschlange gehen nur die Datenbanken
         // des Abgleichs auf den Palm, der Rest wartet
         let synced = [PalmPIMFamily.garnet, .classic].flatMap { family in PalmPIMFamily.Kind.allCases.map { "\(family.databaseName($0)).pdb" } }
-        let files = mode.installs ? queue.pendingFiles : queue.pendingFiles.filter { synced.contains($0.lastPathComponent) }
+        var files = mode.installs ? queue.pendingFiles : queue.pendingFiles.filter { synced.contains($0.lastPathComponent) }
+        if pimFamily(session) == .cobalt {
+            // Eine Garnet- oder klassische PIM-Datenbank sagt einem Cobalt nichts:
+            // seine PIM-Daten liegen in Schema-Datenbanken. Was davon noch in
+            // der Warteschlange liegt (ein alter einseitiger Export), geht nicht
+            // auf den Palm, sondern in den Papierkorb.
+            for file in files where synced.contains(file.lastPathComponent) {
+                tabLog(tabId, L10n.logCobaltSkipsGarnetPIM(file.lastPathComponent))
+                if let item = queue.items.first(where: { $0.url == file }) { queue.remove(item) }
+            }
+            files.removeAll { synced.contains($0.lastPathComponent) }
+        }
         session.files = files
         queue.beginInstall(files, session: session.token)
         deviceManager.updateRomVersion(session.romVersion, for: profileId)
