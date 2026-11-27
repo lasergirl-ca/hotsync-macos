@@ -2461,6 +2461,514 @@ static void raw_dlp(int sd, const char *args)
 	pi_buffer_free(buf);
 }
 
+/* ------------------------------------------------------------------------
+ * Cobalt DLP: die Palm-OS-6-Erweiterungen (Befehlswörter 0x70-0xB2), mit
+ * denen Cobalt seine Schema-Datenbanken (Kalender, Kontakte, Aufgaben,
+ * Memos) erreichbar macht. pilot-link kennt sie nicht; die Rahmen werden
+ * hier selbst gebaut und mit pi_write/pi_read über den DLP-Socket
+ * geschickt. Nur lesende Befehle (Schritt 2 von Planning/cobalt-pim.md).
+ *
+ * Request:  u16 BE (0x7000|cmd), argc u8, 00, ein Argument id 0x20
+ * Reply:    u16 BE (0xF000|cmd), argc u8, 00, err u16 BE, Argument
+ * Argument: tiny [id][len u8], short [0x80|id][00][len u16],
+ *           long [0x40|id][00][len u32] (Bit 6, nicht 0xC0).
+ * Alle Felder big-endian, Strings als u32 Länge (mit NUL) + Bytes.
+ * ------------------------------------------------------------------------ */
+
+#define COBALT_ARG_ID		0x20
+#define COBALT_REPLY_MAX	(256 * 1024)
+#define COBALT_NAME_MAX		64
+
+/* Die DLP-Fehlernummern, die Cobalts DLServer aus seinen status_t macht;
+ * ab 25 Cobalt-Zusätze (Namen nach dem jeweiligen Data-Manager-Fehler). */
+static const char *cobalt_error_name(int err)
+{
+	switch (err) {
+	case 1: return "system error";
+	case 2: return "illegal request";
+	case 3: return "out of memory";
+	case 4: return "bad parameter";
+	case 5: return "not found";
+	case 6: return "no database open";
+	case 7: return "already open";
+	case 8: return "too many open";
+	case 9: return "already exists";
+	case 10: return "cannot open";
+	case 11: return "record deleted";
+	case 12: return "record busy";
+	case 13: return "not supported";
+	case 15: return "read-only";
+	case 16: return "not enough space";
+	case 17: return "limit exceeded";
+	case 18: return "cancelled";
+	case 21: return "argument size";
+	case 23: return "decrypt failed";
+	case 25: return "access denied (trust required)";
+	case 26: return "not a schema database";
+	case 27: return "not a secure database";
+	case 28: return "not a record database";
+	case 29: return "invalid table name";
+	case 30: return "invalid column id";
+	case 31: return "invalid property id";
+	case 32: return "invalid category";
+	case 33: return "invalid column type";
+	case 34: return "invalid column spec";
+	case 35: return "one or more failed";
+	case 36: return "invalid schema definition";
+	case 37: return "no data";
+	case 38: return "table not empty";
+	case 40: return "column id exists";
+	case 41: return "category limit";
+	case 42: return "built-in property";
+	case 43: return "name exists";
+	case 44: return "aborted";
+	case 45: return "encryption failure";
+	case 47: return "invalid id";
+	case 48: return "invalid column name";
+	case 49: return "invalid size spec";
+	case 50: return "unknown handle";
+	default: return "unknown error";
+	}
+}
+
+/* Ein Fehler des Palm auf einen Cobalt-Befehl: das gewohnte error-Ereignis,
+ * dazu Nummer und Name, damit die App 25 (Vertrauen nötig) oder 15
+ * (schreibgeschützt) erkennen kann. */
+static void emit_cobalt_error(const char *stage, int cmd, int err)
+{
+	emit_begin("error");
+	emit_str("stage", stage, 0);
+	printf(",\"message\":\"Cobalt command 0x%02X failed: %s (%d)\"", cmd, cobalt_error_name(err), err);
+	emit_int("cmd", cmd);
+	emit_int("code", err);
+	emit_str("name", cobalt_error_name(err), 0);
+	emit_end();
+}
+
+/* --- Bytes schreiben (Request) --- */
+
+struct cobalt_req {
+	uint8_t data[4096];
+	size_t len;		/* Argumentbytes bisher (ohne Rahmen) */
+	int overflow;
+};
+
+#define COBALT_REQ_HEAD 10	/* Platz für Rahmen und das längste Argumentkopf (6) */
+
+static void req_init(struct cobalt_req *r)
+{
+	r->len = 0;
+	r->overflow = 0;
+}
+
+static void req_bytes(struct cobalt_req *r, const void *bytes, size_t n)
+{
+	if (r->len + n > sizeof(r->data) - COBALT_REQ_HEAD) {
+		r->overflow = 1;
+		return;
+	}
+	memcpy(r->data + COBALT_REQ_HEAD + r->len, bytes, n);
+	r->len += n;
+}
+
+static void req_u8(struct cobalt_req *r, unsigned v)
+{
+	uint8_t b = (uint8_t)v;
+	req_bytes(r, &b, 1);
+}
+
+static void req_u16(struct cobalt_req *r, unsigned v)
+{
+	uint8_t b[2] = { (uint8_t)(v >> 8), (uint8_t)v };
+	req_bytes(r, b, 2);
+}
+
+static void req_u32(struct cobalt_req *r, uint32_t v)
+{
+	uint8_t b[4] = { (uint8_t)(v >> 24), (uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v };
+	req_bytes(r, b, 4);
+}
+
+/* Ein Name, wie Cobalt ihn erwartet: u32 Länge einschließlich NUL, dann
+ * die Bytes mit NUL. */
+static void req_string(struct cobalt_req *r, const char *s)
+{
+	size_t n = strlen(s) + 1;
+	req_u32(r, (uint32_t)n);
+	req_bytes(r, s, n);
+}
+
+/* Vier Zeichen (Typ, Creator) als u32. */
+static uint32_t fourcc(const char *s)
+{
+	return (uint32_t)(uint8_t)s[0] << 24 | (uint32_t)(uint8_t)s[1] << 16
+	    | (uint32_t)(uint8_t)s[2] << 8 | (uint32_t)(uint8_t)s[3];
+}
+
+/* --- Bytes lesen (Reply) --- */
+
+struct cobalt_cur {
+	const uint8_t *p;
+	size_t left;
+	int bad;	/* über das Ende gelesen: der Rest ist Unsinn */
+};
+
+static const uint8_t *cur_take(struct cobalt_cur *c, size_t n)
+{
+	static const uint8_t zeros[8];
+	const uint8_t *p;
+
+	if (c->bad || n > c->left) {
+		c->bad = 1;
+		c->left = 0;
+		return n <= sizeof(zeros) ? zeros : NULL;
+	}
+	p = c->p;
+	c->p += n;
+	c->left -= n;
+	return p;
+}
+
+static unsigned cur_u8(struct cobalt_cur *c)
+{
+	return cur_take(c, 1)[0];
+}
+
+static unsigned cur_u16(struct cobalt_cur *c)
+{
+	const uint8_t *p = cur_take(c, 2);
+	return (unsigned)p[0] << 8 | p[1];
+}
+
+static uint32_t cur_u32(struct cobalt_cur *c)
+{
+	const uint8_t *p = cur_take(c, 4);
+	return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
+}
+
+/* u32 Länge + Bytes; kopiert bis zur ersten NUL oder bis cap-1 in out. */
+static void cur_string(struct cobalt_cur *c, char *out, size_t cap)
+{
+	uint32_t n = cur_u32(c);
+	const uint8_t *p = (n > c->left) ? cur_take(c, c->left + 1) : cur_take(c, n);
+	size_t i;
+
+	out[0] = '\0';
+	if (p == NULL || c->bad)
+		return;
+	for (i = 0; i < n && i + 1 < cap && p[i] != '\0'; i++)
+		out[i] = (char)p[i];
+	out[i] = '\0';
+}
+
+static void fourcc_string(uint32_t v, char out[5])
+{
+	int i;
+	for (i = 0; i < 4; i++) {
+		unsigned c = (v >> (24 - 8 * i)) & 0xFF;
+		out[i] = (c >= 0x20 && c < 0x7F) ? (char)c : '?';
+	}
+	out[4] = '\0';
+}
+
+/* Eine Cobalt-Antwort: Fehler und das eine Argument. */
+struct cobalt_reply {
+	int err;
+	int argc;
+	const uint8_t *arg;
+	size_t arglen;
+};
+
+/* Liest eine Antwortnachricht und zerlegt sie; -1, wenn der Transport
+ * versagt oder die Antwort nicht zum Befehl passt (Ereignis ausgegeben).
+ * Für Befehle, die mehrere Nachrichten schicken (0xAE: Daten, dann ein
+ * leeres F0 AE), ist dies pro Nachricht einmal aufzurufen. */
+static int cobalt_read_reply(int sd, const char *stage, int cmd, pi_buffer_t *buf, struct cobalt_reply *out)
+{
+	ssize_t got;
+	unsigned word;
+	const uint8_t *p;
+
+	memset(out, 0, sizeof(*out));
+	pi_buffer_clear(buf);
+	got = pi_read(sd, buf, buf->allocated);
+	if (got < 0) {
+		emit_error(stage, "read failed (%ld)", (long)got);
+		return -1;
+	}
+	if (buf->used < 6) {
+		emit_error(stage, "short reply (%lu bytes)", (unsigned long)buf->used);
+		return -1;
+	}
+	p = buf->data;
+	word = (unsigned)p[0] << 8 | p[1];
+	if (word != (0xF000u | (unsigned)cmd)) {
+		emit_error(stage, "reply %04x does not match command 0x%02X", word, cmd);
+		return -1;
+	}
+	out->argc = p[2];
+	out->err = (int)((unsigned)p[4] << 8 | p[5]);
+	if (out->argc == 0 || buf->used == 6)
+		return 0;
+	p += 6;
+	{
+		size_t rest = buf->used - 6, head, len;
+		unsigned id = p[0];
+
+		if (id & 0x40) {
+			if (rest < 6)
+				goto truncated;
+			head = 6;
+			len = (size_t)p[2] << 24 | (size_t)p[3] << 16 | (size_t)p[4] << 8 | p[5];
+		} else if (id & 0x80) {
+			if (rest < 4)
+				goto truncated;
+			head = 4;
+			len = (size_t)p[2] << 8 | p[3];
+		} else {
+			if (rest < 2)
+				goto truncated;
+			head = 2;
+			len = p[1];
+		}
+		if (len > rest - head)
+			goto truncated;
+		out->arg = p + head;
+		out->arglen = len;
+	}
+	return 0;
+truncated:
+	emit_error(stage, "truncated reply argument");
+	return -1;
+}
+
+/* Schickt einen Cobalt-Befehl mit dem Argument in r und liest die Antwort.
+ * 0 bei Erfolg (Antwortargument in rp), 1 bei einem Fehler des Palm
+ * (Ereignis ausgegeben, rp->err gesetzt), -1 bei Transportfehlern. */
+static int cobalt_exec(int sd, const char *stage, int cmd, struct cobalt_req *r, pi_buffer_t *buf, struct cobalt_reply *rp)
+{
+	uint8_t *start;
+	size_t head, total;
+
+	if (r->overflow) {
+		emit_error(stage, "request too long");
+		return -1;
+	}
+	/* Argumentkopf direkt vor den Argumentbytes, der Rahmen davor */
+	if (r->len < 256)
+		head = 2;
+	else if (r->len <= 0xFFFF)
+		head = 4;
+	else
+		head = 6;
+	start = r->data + COBALT_REQ_HEAD - head - 4;
+	start[0] = 0x70;
+	start[1] = (uint8_t)cmd;
+	start[2] = 1;
+	start[3] = 0;
+	if (head == 2) {
+		start[4] = COBALT_ARG_ID;
+		start[5] = (uint8_t)r->len;
+	} else if (head == 4) {
+		start[4] = 0x80 | COBALT_ARG_ID;
+		start[5] = 0;
+		start[6] = (uint8_t)(r->len >> 8);
+		start[7] = (uint8_t)r->len;
+	} else {
+		start[4] = 0x40 | COBALT_ARG_ID;
+		start[5] = 0;
+		start[6] = (uint8_t)(r->len >> 24);
+		start[7] = (uint8_t)(r->len >> 16);
+		start[8] = (uint8_t)(r->len >> 8);
+		start[9] = (uint8_t)r->len;
+	}
+	total = 4 + head + r->len;
+	pi_flush(sd, PI_FLUSH_INPUT);
+	if (pi_write(sd, start, total) < (ssize_t)total) {
+		emit_error(stage, "write failed (%d)", pi_error(sd));
+		return -1;
+	}
+	if (cobalt_read_reply(sd, stage, cmd, buf, rp) < 0)
+		return -1;
+	if (rp->err != 0) {
+		emit_cobalt_error(stage, cmd, rp->err);
+		return 1;
+	}
+	return 0;
+}
+
+/* Offene Schema-Datenbanken dieser Sitzung, nach dem Handle-Byte des Palm
+ * (ab 1). Nur zur Beschriftung der Ereignisse; der Palm führt das Buch. */
+static char cobalt_open_names[256][COBALT_NAME_MAX];
+
+static const char *cobalt_handle_name(unsigned handle)
+{
+	return cobalt_open_names[handle & 0xFF];
+}
+
+/* Datum aus der Liste: u16 Jahr, Monat, Tag, Stunde, Minute, Sekunde, 00.
+ * Jahr 0 = nicht gesetzt (die anderen Bytes sind dann Zufall). */
+static void emit_cobalt_date(const char *key, struct cobalt_cur *c)
+{
+	const uint8_t *p = cur_take(c, 8);
+	unsigned year = (unsigned)p[0] << 8 | p[1];
+	char text[32];
+
+	if (year == 0)
+		return;
+	snprintf(text, sizeof(text), "%04u-%02u-%02u %02u:%02u:%02u", year, p[2], p[3], p[4], p[5], p[6]);
+	emit_str(key, text, 0);
+}
+
+/* "cobaltlist": 0x7F mit Flags 0x0007 (Schema-Datenbanken, ROM und RAM).
+ * Ein cobaltDatabase pro Datenbank, dann cobaltListDone mit der Anzahl.
+ * Attribut 0x1000 = Schema, 0x2000 = gesichert (Vertrauen nötig). */
+static void cobalt_list(int sd)
+{
+	struct cobalt_req r;
+	struct cobalt_reply rp;
+	struct cobalt_cur c;
+	pi_buffer_t *buf = pi_buffer_new(COBALT_REPLY_MAX);
+	uint32_t count, i;
+
+	req_init(&r);
+	req_u16(&r, 0x0007);
+	if (cobalt_exec(sd, "cobaltlist", 0x7F, &r, buf, &rp) == 0) {
+		c.p = rp.arg;
+		c.left = rp.arglen;
+		c.bad = 0;
+		count = cur_u32(&c);
+		for (i = 0; i < count && !c.bad; i++) {
+			char type[5], creator[5], name[COBALT_NAME_MAX];
+			unsigned marker = cur_u8(&c), attr, misc, version;
+			uint32_t modnum;
+
+			if (marker != 0x80) {
+				emit_error("cobaltlist", "record %u has marker 0x%02x", (unsigned)i, marker);
+				break;
+			}
+			fourcc_string(cur_u32(&c), type);
+			fourcc_string(cur_u32(&c), creator);
+			attr = cur_u16(&c);
+			misc = cur_u16(&c);
+			version = cur_u16(&c);
+			emit_begin("cobaltDatabase");
+			emit_int("index", (long)i);
+			emit_cobalt_date("created", &c);
+			emit_cobalt_date("modified", &c);
+			emit_cobalt_date("backedUp", &c);
+			modnum = cur_u32(&c);
+			cur_string(&c, name, sizeof(name));
+			cur_u8(&c);	/* abschließendes 00 */
+			emit_str("name", name, 1);
+			emit_str("type", type, 0);
+			emit_str("creator", creator, 0);
+			emit_int("attr", attr);
+			emit_int("schema", (attr & 0x1000) != 0);
+			emit_int("secure", (attr & 0x2000) != 0);
+			emit_int("misc", misc);
+			emit_int("version", version);
+			emit_int("modnum", (long)modnum);
+			emit_end();
+		}
+		if (c.bad)
+			emit_error("cobaltlist", "list truncated after %u of %u databases", (unsigned)i, (unsigned)count);
+		emit_begin("cobaltListDone");
+		emit_int("count", (long)i);
+		emit_end();
+	}
+	pi_buffer_free(buf);
+}
+
+/* "cobaltopen NAME CREATOR MODE [TOKENHEX]": 0x81. MODE 1 lesen, 2
+ * schreiben, 3 beides. Das Token (10 Bytes vom letzten Schließen) geht
+ * mit, wenn eines da ist. Antwort: cobaltOpened mit dem Handle. */
+static void cobalt_open(int sd, const char *args)
+{
+	char name[COBALT_NAME_MAX], creator[8], token_hex[2 * 64 + 1];
+	uint8_t token[64];
+	size_t token_len = 0;
+	int mode, n;
+	struct cobalt_req r;
+	struct cobalt_reply rp;
+	pi_buffer_t *buf;
+
+	token_hex[0] = '\0';
+	n = sscanf(args, "%63s %7s %d %128s", name, creator, &mode, token_hex);
+	if (n < 3 || strlen(creator) != 4 || mode < 1 || mode > 3 || strlen(name) > 31) {
+		emit_error("cobaltopen", "usage: cobaltopen NAME CREATOR MODE [TOKENHEX]");
+		return;
+	}
+	if (n == 4) {
+		size_t h = strlen(token_hex);
+		if (h % 2 || h / 2 > sizeof(token) || !hex_decode(token_hex, token, h / 2)) {
+			emit_error("cobaltopen", "bad token hex");
+			return;
+		}
+		token_len = h / 2;
+	}
+	req_init(&r);
+	req_u32(&r, fourcc(creator));
+	req_u32(&r, (uint32_t)token_len);
+	req_u16(&r, (unsigned)mode);
+	req_u16(&r, 0);		/* share */
+	req_string(&r, name);
+	req_bytes(&r, token, token_len);
+	buf = pi_buffer_new(COBALT_REPLY_MAX);
+	if (cobalt_exec(sd, "cobaltopen", 0x81, &r, buf, &rp) == 0) {
+		if (rp.arglen < 1) {
+			emit_error("cobaltopen", "no handle in the reply");
+		} else {
+			unsigned handle = rp.arg[0];
+			snprintf(cobalt_open_names[handle], COBALT_NAME_MAX, "%s", name);
+			emit_begin("cobaltOpened");
+			emit_int("handle", handle);
+			emit_str("name", name, 1);
+			emit_str("creator", creator, 0);
+			emit_int("mode", mode);
+			emit_end();
+		}
+	}
+	pi_buffer_free(buf);
+}
+
+/* "cobaltclose HANDLE [FLAGS]": 0x82. FLAGS 0x80 Sicherungsdatum setzen,
+ * 0x40 Änderungsdatum setzen, 0x20 Sync-Token zurückgeben (nach einem
+ * Öffnen mit Modus 1 antwortet der Palm darauf mit 15; nach einem
+ * lesenden Öffnen also mit 0 schließen). cobaltClosed trägt das Token als
+ * Hex, wenn eines kam. */
+static void cobalt_close(int sd, const char *args)
+{
+	int handle, flags = 0, n;
+	struct cobalt_req r;
+	struct cobalt_reply rp;
+	pi_buffer_t *buf;
+
+	n = sscanf(args, "%i %i", &handle, &flags);
+	if (n < 1 || handle < 1 || handle > 255 || flags < 0 || flags > 255) {
+		emit_error("cobaltclose", "usage: cobaltclose HANDLE [FLAGS]");
+		return;
+	}
+	req_init(&r);
+	req_u8(&r, (unsigned)handle);
+	req_u8(&r, (unsigned)flags);
+	buf = pi_buffer_new(COBALT_REPLY_MAX);
+	if (cobalt_exec(sd, "cobaltclose", 0x82, &r, buf, &rp) == 0) {
+		struct cobalt_cur c = { rp.arg, rp.arglen, 0 };
+		uint32_t len = cur_u32(&c);
+		const uint8_t *token = len <= c.left ? cur_take(&c, len) : NULL;
+
+		emit_begin("cobaltClosed");
+		emit_int("handle", handle);
+		emit_str("name", cobalt_handle_name((unsigned)handle), 1);
+		if (token != NULL && len > 0)
+			emit_hex("token", token, len);
+		emit_end();
+		cobalt_open_names[handle][0] = '\0';
+	}
+	pi_buffer_free(buf);
+}
+
 static int wait_for_command(int sd)
 {
 	struct pollfd in = { .fd = STDIN_FILENO, .events = POLLIN };
@@ -2550,6 +3058,12 @@ static void run_commands(int sd)
 				break;	/* the server has ended the session */
 		} else if (strncmp(line, "rawdlp ", 7) == 0) {
 			raw_dlp(sd, line + 7);
+		} else if (strcmp(line, "cobaltlist") == 0) {
+			cobalt_list(sd);
+		} else if (strncmp(line, "cobaltopen ", 11) == 0) {
+			cobalt_open(sd, line + 11);
+		} else if (strncmp(line, "cobaltclose ", 12) == 0) {
+			cobalt_close(sd, line + 12);
 		} else if (strcmp(line, "end") == 0) {
 			break;
 		} else if (line[0] != '\0') {
