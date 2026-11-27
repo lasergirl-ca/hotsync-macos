@@ -54,12 +54,11 @@ public enum CobaltColumnType: UInt8, Sendable {
 
 // MARK: - Decoding primitives (little-endian device bytes)
 
-/// How a 32-bit DateTimeSecs value is read. Cobalt's clock counts seconds
-/// from 1970 (`cobaltDateTimeEpoch`); whether a stored value is the device's
-/// local wall-clock time or UTC is unconfirmed (the SDK docs say UTC, the
-/// Garnet applications store local time). Until a real row settles it the
-/// value is taken as local wall-clock seconds, so 2026-11-26 09:00 on the
-/// Palm reads as 09:00 whatever zone the Mac is in.
+/// How a 32-bit DateTimeSecs value is read. The Cobalt SDK's file-format
+/// documentation (DateBookSchema: "START time & date in posix epoch time,
+/// UTC seconds since 1/1/1970") settles it: UTC, with the event's Timezone
+/// column naming the zone it is shown in. `.deviceLocalWallClock` stays as
+/// the switch to flip should a real row contradict the documentation.
 public enum CobaltDateTimeInterpretation: Sendable {
     /// seconds since the epoch in the device's local time: read the
     /// components without a zone shift
@@ -69,11 +68,11 @@ public enum CobaltDateTimeInterpretation: Sendable {
     case utc
 }
 
-/// **Assumption, confirm with a real row.**
-public let cobaltDateTimeInterpretation: CobaltDateTimeInterpretation = .deviceLocalWallClock
+/// Per the SDK documentation (see above); a real row has not confirmed it yet.
+public let cobaltDateTimeInterpretation: CobaltDateTimeInterpretation = .utc
 
-/// The DateTimeSecs epoch: 1970-01-01 00:00 (Cobalt's clock, unlike the
-/// 1904 of Palm OS before it). **Assumption, confirm with a real row.**
+/// The DateTimeSecs epoch: 1970-01-01 00:00 UTC ("posix epoch time" in the
+/// SDK's DateBookSchema documentation; Palm OS before Cobalt counted from 1904).
 public let cobaltDateTimeEpoch = Date(timeIntervalSince1970: 0)
 
 /// RepeatEndDate "never" (section 2.2).

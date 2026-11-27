@@ -45,7 +45,7 @@ private func row(id: UInt32 = 0x80C4_8001, categories: [UInt32] = [], _ columns:
     #expect(cobaltDateTime(hex("ffffff7f")) == nil)   // never
     let c = cobaltDateTimeComponents(date!, zone: TimeZone(identifier: "US/Central"))
     #expect(c.date == PalmDate(year: 2026, month: 11, day: 26))
-    #expect(c.time == PalmTime(hour: 9, minute: 0))
+    #expect(c.time == PalmTime(hour: 3, minute: 0))   // 09:00 UTC is 03:00 in Chicago (CST)
 }
 
 @Test func varCharIsUTF8WithAWindows1252Fallback() {
@@ -94,7 +94,7 @@ private func row(id: UInt32 = 0x80C4_8001, categories: [UInt32] = [], _ columns:
 @Test func timedEventRowBecomesACalendarEvent() throws {
     let event = row([
         10: "00", 20: "00",
-        30: "10f5076b", 40: "280a086b",      // 2026-11-26 09:00 - 10:30
+        30: "7049086b", 40: "885e086b",      // 2026-11-26 09:00 - 10:30 Central, stored as UTC
         50: "55532f4365"+"6e7472616c00",     // "US/Central"
         100: "ff", 110: "00",                // no alarm
         200: "00", 210: "ffffff7f", 220: "00", 230: "00", 240: "00",
@@ -119,7 +119,7 @@ private func row(id: UInt32 = 0x80C4_8001, categories: [UInt32] = [], _ columns:
 }
 
 @Test func untimedEventRowHasNoTime() throws {
-    let event = row([20: "01", 30: "000e0e6b", 40: "000e0e6b", 400: "486f6c696461 7900".replacingOccurrences(of: " ", with: "")])
+    let event = row([20: "01", 30: "000e0e6b", 40: "000e0e6b", 50: "55544300", 400: "486f6c696461 7900".replacingOccurrences(of: " ", with: "")])
     let e = try #require(CobaltRecords.calendarEvent(event)).record
     #expect(e.date == PalmDate(year: 2026, month: 12, day: 1))
     #expect(e.time == nil)
@@ -133,11 +133,12 @@ private func row(id: UInt32 = 0x80C4_8001, categories: [UInt32] = [], _ columns:
 @Test func repeatingEventRowKeepsRuleAlarmAndExceptions() throws {
     let event = row([
         10: "01", 20: "00",
-        30: "10f5076b", 40: "280a086b",
+        30: "7049086b", 40: "885e086b",      // 09:00 - 10:30 Central (UTC on the wire)
+        50: "55532f4365"+"6e7472616c00",     // "US/Central"
         100: "0f", 110: "00",                // 15 minutes before
-        200: "02", 210: "0042ac6b",          // weekly until 2027-03-31
+        200: "02", 210: "5088ac6b",          // weekly until 2027-03-31 (midnight Central)
         220: "01", 230: "2a", 240: "00",     // every week, Mon Wed Fri
-        300: "1081126b" + "90bb1b6b",        // 2026-12-04 and 2026-12-11, 09:00
+        300: "70d5126b" + "f00f1c6b",        // 2026-12-04 and 2026-12-11, 09:00 Central
         400: "47796d00",
     ])
     let converted = try #require(CobaltRecords.calendarEvent(event))
